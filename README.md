@@ -1,4 +1,4 @@
-# Veridian
+# LoanLens Ai
 ### Video-Based Digital Loan Origination System — MVP
 
 A real-time, video-first loan onboarding system built for a hackathon. Customers complete their loan application through a live video session — no paper forms, no manual KYC, no branch visits.
