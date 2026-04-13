@@ -85,7 +85,7 @@ export default function VideoSession() {
   } = useTranscription({
     silenceThreshold: 0.012,
     silenceDurationMs: 1400,
-    minChunkMs: 600,
+    maxChunkMs: 600,
   });
 
   // Auto-scroll transcript to bottom
