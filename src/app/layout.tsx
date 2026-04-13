@@ -6,7 +6,7 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Veridian",
+  title: "LoanLens Ai",
   description: "Video-based loan origination",
 };
 
