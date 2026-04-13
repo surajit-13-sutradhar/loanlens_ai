@@ -12,20 +12,15 @@ export interface GeoLocation {
 }
 
 export interface MediaPermissionsState {
-  // Statuses
   cameraStatus: PermissionStatus;
   micStatus: PermissionStatus;
   locationStatus: PermissionStatus;
-
-  // Data
-  stream: MediaStream | null;       // combined video + audio stream
-  videoStream: MediaStream | null;  // video only
-  audioStream: MediaStream | null;  // audio only
+  stream: MediaStream | null;
+  videoStream: MediaStream | null;
+  audioStream: MediaStream | null;
   location: GeoLocation | null;
   error: string | null;
-
-  // Actions
-  requestAll: () => Promise<void>;
+  requestAll: () => Promise<boolean>;   // ← now returns boolean
   requestCamera: () => Promise<void>;
   requestMic: () => Promise<void>;
   requestLocation: () => Promise<void>;
@@ -43,7 +38,6 @@ export function useMediaPermissions(): MediaPermissionsState {
   const [location, setLocation] = useState<GeoLocation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Keep refs so stopAll() always has the latest streams
   const streamRef = useRef<MediaStream | null>(null);
   const videoStreamRef = useRef<MediaStream | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
@@ -53,11 +47,7 @@ export function useMediaPermissions(): MediaPermissionsState {
       setCameraStatus("requesting");
       setError(null);
       const vs = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "user",
-        },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
       });
       videoStreamRef.current = vs;
       setVideoStream(vs);
@@ -74,11 +64,7 @@ export function useMediaPermissions(): MediaPermissionsState {
       setMicStatus("requesting");
       setError(null);
       const as = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000, // Deepgram works best at 16kHz
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
       });
       audioStreamRef.current = as;
       setAudioStream(as);
@@ -94,11 +80,7 @@ export function useMediaPermissions(): MediaPermissionsState {
     try {
       setLocationStatus("requesting");
       setError(null);
-
-      if (!navigator.geolocation) {
-        throw new Error("Geolocation is not supported by this browser.");
-      }
-
+      if (!navigator.geolocation) throw new Error("Geolocation not supported.");
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true,
@@ -106,7 +88,6 @@ export function useMediaPermissions(): MediaPermissionsState {
           maximumAge: 0,
         });
       });
-
       setLocation({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
@@ -121,33 +102,19 @@ export function useMediaPermissions(): MediaPermissionsState {
     }
   }, []);
 
-  const requestAll = useCallback(async () => {
+  const requestAll = useCallback(async (): Promise<boolean> => {
     try {
       setError(null);
-
-      // Request camera + mic together (single browser prompt)
       setCameraStatus("requesting");
       setMicStatus("requesting");
 
       const combinedStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "user",
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          sampleRate: 16000,
-        },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 },
       });
 
-      // Split into separate streams for modular use
-      const videoTracks = combinedStream.getVideoTracks();
-      const audioTracks = combinedStream.getAudioTracks();
-
-      const vs = new MediaStream(videoTracks);
-      const as = new MediaStream(audioTracks);
+      const vs = new MediaStream(combinedStream.getVideoTracks());
+      const as = new MediaStream(combinedStream.getAudioTracks());
 
       streamRef.current = combinedStream;
       videoStreamRef.current = vs;
@@ -160,18 +127,19 @@ export function useMediaPermissions(): MediaPermissionsState {
       setCameraStatus("granted");
       setMicStatus("granted");
 
-      // Location separately (different browser prompt)
-      await requestLocation();
+      // Location separately — non-blocking, don't let it fail the whole call
+      requestLocation();
 
+      return true;                        // ← success
     } catch (err) {
       setCameraStatus("denied");
       setMicStatus("denied");
       setError("Could not access camera or microphone. Please check browser permissions.");
       console.error("Media error:", err);
+      return false;                       // ← failure
     }
   }, [requestLocation]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -200,18 +168,9 @@ export function useMediaPermissions(): MediaPermissionsState {
   }, []);
 
   return {
-    cameraStatus,
-    micStatus,
-    locationStatus,
-    stream,
-    videoStream,
-    audioStream,
-    location,
-    error,
-    requestAll,
-    requestCamera,
-    requestMic,
-    requestLocation,
-    stopAll,
+    cameraStatus, micStatus, locationStatus,
+    stream, videoStream, audioStream,
+    location, error,
+    requestAll, requestCamera, requestMic, requestLocation, stopAll,
   };
 }
