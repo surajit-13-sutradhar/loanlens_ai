@@ -21,7 +21,7 @@ A real-time, video-first loan onboarding system built for a hackathon. Customers
 
 ## Project Overview
 
-Veridian is an MVP for a video-based loan origination system. The core idea is to replace traditional form-based loan applications with a live video session that:
+LoanLens Ai is an MVP for a video-based loan origination system. The core idea is to replace traditional form-based loan applications with a live video session that:
 
 - Captures the customer's face, voice, and location in real time
 - Transcribes speech to text for consent and data capture
@@ -150,7 +150,7 @@ Full authentication flow using Clerk.
 The protected main application page.
 
 - Only accessible when signed in — middleware redirects to sign-in otherwise
-- Top navigation bar with the Veridian logo and Clerk `UserButton`
+- Top navigation bar with the LoanLens Ai logo and Clerk `UserButton`
 - Hosts the `VideoSession` component as the primary interaction surface
 - Client component (`"use client"`) to support browser APIs and interactivity
 
