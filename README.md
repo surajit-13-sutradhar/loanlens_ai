@@ -1,4 +1,4 @@
-# LoanLens Ai
+# LoanLens AI
 ### Video-Based Digital Loan Origination System — MVP
 
 A real-time, video-first loan onboarding system built for a hackathon. Customers complete their loan application through a live video session — no paper forms, no manual KYC, no branch visits.
@@ -21,14 +21,14 @@ A real-time, video-first loan onboarding system built for a hackathon. Customers
 
 ## Project Overview
 
-LoanLens Ai is an MVP for a video-based loan origination system. The core idea is to replace traditional form-based loan applications with a live video session that:
+LoanLens AI is an MVP for a video-based loan origination system. The core idea is to replace traditional form-based loan applications with a live video session that:
 
 - Captures the customer's face, voice, and location in real time
 - Transcribes speech to text for consent and data capture
 - Records the session as a video blob for audit and compliance
 - Uses AI to assess risk and generate a personalised loan offer
 
-This repository covers the **frontend shell, authentication, media permissions, and video capture layer** — the foundation that the ML and data layers will plug into.
+This repository now covers the **admin panel, session management, email delivery, authentication, media permissions, and video capture layer**.
 
 ---
 
@@ -39,6 +39,7 @@ This repository covers the **frontend shell, authentication, media permissions, 
 | Frontend | Next.js 15 (App Router) | UI + API routes | Free |
 | Styling | Tailwind CSS + ShadCN | Component library | Free |
 | Auth | Clerk | User sessions, sign-in/sign-up | Free tier |
+| Email | Nodemailer + Gmail | Session link delivery | Free |
 | Speech-to-Text | Deepgram Nova-3 | Real-time streaming STT | $200 free credit |
 | Database | Supabase Postgres | Structured data storage | Free tier (500MB) |
 | Blob Storage | Supabase Storage | Video/audio blob storage | Free tier (1GB) |
@@ -54,27 +55,38 @@ This repository covers the **frontend shell, authentication, media permissions, 
 loan-mvp/
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx              # Root layout with ClerkProvider
-│   │   ├── page.tsx                # Landing page (public)
+│   │   ├── layout.tsx                    # Root layout with ClerkProvider
+│   │   ├── page.tsx                      # Landing page (public)
+│   │   ├── globals.css
+│   │   ├── favicon.ico
+│   │   ├── admin/
+│   │   │   └── page.tsx                  # Admin panel — create sessions, view all sessions
+│   │   ├── api/
+│   │   │   └── sessions/
+│   │   │       ├── route.ts              # GET /api/sessions — returns all sessions
+│   │   │       └── create/
+│   │   │           └── route.ts          # POST /api/sessions/create — creates session + sends email
 │   │   ├── dashboard/
-│   │   │   └── page.tsx            # Main app shell (protected)
+│   │   │   └── page.tsx                  # Video verification shell (protected)
+│   │   ├── join/
+│   │   │   └── [token]/
+│   │   │       └── page.tsx              # Token validation + redirect to sign-in or dashboard
 │   │   ├── sign-in/
 │   │   │   └── [[...sign-in]]/
-│   │   │       └── page.tsx        # Clerk sign-in page
+│   │   │       └── page.tsx              # Clerk sign-in page
 │   │   └── sign-up/
 │   │       └── [[...sign-up]]/
-│   │           └── page.tsx        # Clerk sign-up page
+│   │           └── page.tsx              # Clerk sign-up page
 │   ├── components/
-│   │   ├── ui/                     # ShadCN auto-generated components
-│   │   │   ├── button.tsx
-│   │   │   ├── card.tsx
-│   │   │   ├── badge.tsx
-│   │   │   └── ...
-│   │   └── VideoSession.tsx        # Core video capture component
+│   │   ├── ui/                           # ShadCN auto-generated components
+│   │   └── VideoSession.tsx              # Core video capture component
 │   ├── hooks/
-│   │   └── useMediaPermissions.ts  # Camera, mic, location access hook
-│   └── middleware.ts               # Clerk route protection
-├── .env.local                      # API keys (never commit this)
+│   │   └── useMediaPermissions.ts        # Camera, mic, location access hook
+│   ├── lib/
+│   │   ├── sessionStore.ts               # In-memory session store (CRUD helpers)
+│   │   └── utils.ts                      # Shared utilities
+│   └── middleware.ts                     # Clerk route protection
+├── .env.local                            # API keys (never commit this)
 ├── tailwind.config.ts
 ├── next.config.ts
 └── package.json
@@ -96,9 +108,15 @@ NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
 NEXT_PUBLIC_CLERK_AFTER_SIGN_OUT_URL=/
 
+# App URL (used for generating onboarding links)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Gmail (for sending session links via Nodemailer)
+GMAIL_USER=your@gmail.com
+GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
+
 # Deepgram — https://console.deepgram.com
 DEEPGRAM_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
 ```
 
 ---
@@ -143,22 +161,114 @@ Full authentication flow using Clerk.
 - `ClerkProvider` wraps the entire app in `layout.tsx` so session state is available everywhere
 - `UserButton` in the nav handles sign out, profile, and session management
 
-### 2. Dashboard Shell
+---
+
+### 2. Session Store — `sessionStore.ts`
+
+**File:** `src/lib/sessionStore.ts`
+
+A lightweight in-memory store that holds all loan sessions for the duration of the server process. Provides the following helpers:
+
+| Function | Description |
+|---|---|
+| `createSession(session)` | Adds a new session to the store |
+| `getSession(id)` | Retrieves a single session by ID |
+| `getSessions()` | Returns all sessions |
+| `updateSessionStatus(id, status)` | Updates a session's status |
+
+Sessions follow this shape:
+
+```typescript
+interface Session {
+  id: string;         // UUID
+  name: string;
+  phone: string;
+  email: string;
+  status: "pending" | "opened" | "submitted";
+  createdAt: string;  // ISO string
+}
+```
+
+> **Note:** This is intentionally in-memory for the MVP. Sessions are lost on server restart. Supabase Postgres replaces this in the next phase.
+
+---
+
+### 3. API Routes — Sessions
+
+**Files:** `src/app/api/sessions/route.ts`, `src/app/api/sessions/create/route.ts`
+
+#### `GET /api/sessions`
+Returns the full list of all sessions as JSON. Used by the admin panel to populate the sessions table.
+
+#### `POST /api/sessions/create`
+Accepts `{ name, phone, email }` in the request body. Does the following in order:
+1. Generates a UUID as the session token
+2. Constructs a unique onboarding link: `${NEXT_PUBLIC_APP_URL}/join/${id}`
+3. Persists the session to the in-memory store with status `"pending"`
+4. Sends the link to the customer's email via Nodemailer + Gmail
+5. Returns `{ message, link }` on success
+
+Email is sent using a Gmail account configured with an App Password (same pattern as a standard Python/SMTP setup). The `mip_opt_out` principle applies — no customer data is used for any third-party model training.
+
+---
+
+### 4. Admin Panel
+
+**File:** `src/app/admin/page.tsx`
+
+A protected internal page for loan officers to manage onboarding sessions.
+
+**Create Session section:**
+- Input fields for customer name, phone number, and email address
+- On submit, calls `POST /api/sessions/create`, which generates a UUID link and emails it to the customer
+- The generated link is displayed inline with a one-click copy button
+- Toast notifications confirm success or surface errors
+
+**All Sessions table:**
+- Fetches and displays all sessions via `GET /api/sessions`
+- Columns: Name, Phone, Email, Status, Created At
+- Status badges are colour-coded:
+  - 🟡 `PENDING` — link sent, not yet opened
+  - 🔵 `OPENED` — customer has clicked the link
+  - 🟢 `SUBMITTED` — customer has completed the session
+- Manual refresh button; auto-refreshes after each new session is created
+
+---
+
+### 5. Join Page — Token Validation
+
+**File:** `src/app/join/[token]/page.tsx`
+
+The landing page for customers who click their unique onboarding link.
+
+- Validates the token against the session store
+- If invalid or not found: renders a clear error screen ("Invalid or expired link")
+- If valid and status is `"pending"`: updates status to `"opened"` immediately
+- Checks Clerk auth state:
+  - Already signed in → `redirect("/dashboard")`
+  - Not signed in → `redirect("/sign-in?redirect_url=/dashboard")`
+
+This is a **server component** — it runs `auth()` server-side and performs all redirects before anything renders in the browser.
+
+---
+
+### 6. Dashboard Shell
 
 **File:** `src/app/dashboard/page.tsx`
 
-The protected main application page.
+The protected main application page for customers.
 
 - Only accessible when signed in — middleware redirects to sign-in otherwise
-- Top navigation bar with the LoanLens Ai logo and Clerk `UserButton`
+- Top navigation bar with the LoanLens AI logo and Clerk `UserButton`
 - Hosts the `VideoSession` component as the primary interaction surface
-- Client component (`"use client"`) to support browser APIs and interactivity
 
-### 3. Media Permissions Hook — `useMediaPermissions`
+---
+
+### 7. Media Permissions Hook — `useMediaPermissions`
 
 **File:** `src/hooks/useMediaPermissions.ts`
 
-A custom React hook that acts as the single source of truth for all hardware access. This is the most critical piece of the foundation — everything else (video recording, Deepgram STT, fraud detection) consumes from this hook.
+A custom React hook that acts as the single source of truth for all hardware access.
 
 **What it manages:**
 
@@ -171,41 +281,16 @@ A custom React hook that acts as the single source of truth for all hardware acc
 
 **Key design decisions:**
 
-- Camera and microphone are requested **together** in a single browser prompt via `requestAll()` — better UX than two separate popups
-- The combined stream is **split** into separate video and audio streams so the STT layer (Deepgram) can consume just the audio track independently
-- Streams are stored in both **refs** (for `stopAll()` reliability) and **state** (for React re-renders)
+- Camera and microphone are requested together in a single browser prompt via `requestAll()` — better UX than two separate popups
+- The combined stream is split into separate video and audio streams so the STT layer (Deepgram) can consume just the audio track independently
+- Streams are stored in both refs (for `stopAll()` reliability) and state (for React re-renders)
 - Location is requested separately since it triggers a different browser permission prompt
 - Full cleanup on component unmount — all tracks are stopped, camera light turns off
 - `sampleRate: 16000` is set on the audio constraint because Deepgram's Nova-3 model performs best at 16kHz
 
-**Exported interface:**
+---
 
-```typescript
-{
-  // Permission statuses: "idle" | "requesting" | "granted" | "denied" | "error"
-  cameraStatus, micStatus, locationStatus,
-
-  // Live streams
-  stream,       // combined — used for MediaRecorder
-  videoStream,  // video only
-  audioStream,  // audio only — will be fed to Deepgram
-
-  // Location
-  location,     // { latitude, longitude, accuracy, timestamp }
-
-  // Error message if any permission was denied
-  error,
-
-  // Actions
-  requestAll,      // requests everything at once (recommended)
-  requestCamera,   // individual — for granular control
-  requestMic,      // individual
-  requestLocation, // individual
-  stopAll,         // stops all tracks and resets state
-}
-```
-
-### 4. Video Session Component
+### 8. Video Session Component
 
 **File:** `src/components/VideoSession.tsx`
 
@@ -213,87 +298,77 @@ The primary UI component that the customer interacts with. Consumes `useMediaPer
 
 **Session states:** `idle → active → stopped`
 
-**What it does:**
-
-- Displays real-time permission status badges (Camera, Microphone, Location) with colour coding — gray for idle, yellow for requesting, green for granted, red for denied
+- Displays real-time permission status badges (Camera, Microphone, Location)
 - Renders a live `<video>` element fed by the camera stream
-- On session start, initialises a `MediaRecorder` that chunks the combined stream into `video/webm` blobs every second
-- Displays a live recording timer (MM:SS) while the session is active
+- On session start, initialises a `MediaRecorder` chunking the combined stream into `video/webm` blobs every second
+- Displays a live recording timer (MM:SS)
 - On session end, assembles all chunks into a single Blob and generates a temporary `blob://` download URL
 - Shows captured GPS coordinates (lat, lng, accuracy) once location is granted
-- Provides a **Download recording** link after the session ends — for testing only; will be replaced by Supabase upload
 
-**How video is stored (current MVP state):**
-
-```
-Camera hardware
-      ↓
-MediaStream (live pipe of raw frames)
-      ↓
-MediaRecorder (encodes to video/webm)
-      ↓
-Blob chunks[] in memory (collected every 1 second)
-      ↓
-Single Blob assembled on session stop
-      ↓
-blob:// URL (temporary, lives in RAM, gone on refresh)
-```
-
-No database or network calls are made yet. The blob lives only in the browser tab's memory until Supabase storage is wired up.
+> **Note:** The `blob://` download link is for testing only. It lives in RAM and is lost on refresh. Supabase storage replaces this in the next phase.
 
 ---
 
-## How It Works — User Flow
+## How It Works — Full Flow
 
 ```
-1. User visits /dashboard
+1. Loan officer visits /admin
          ↓
-2. Middleware checks Clerk session
+2. Enters customer name, phone, email → clicks "Generate & Send Link"
          ↓
-   Not signed in → redirect to /sign-in
-   Signed in → load dashboard
+3. API creates a UUID session, stores it (status: "pending"), emails the link
          ↓
-3. User clicks "Start Session"
+4. Customer receives email, clicks their unique /join/[token] link
          ↓
-4. Browser prompts: Allow camera + microphone? → Allow
+5. Server validates token, marks session "opened", checks Clerk auth
          ↓
-5. Browser prompts: Allow location? → Allow
+   Not signed in → /sign-in → after auth → /dashboard
+   Already signed in → /dashboard directly
          ↓
-6. Live video feed appears, recording timer starts
+6. Customer clicks "Start Session"
+         ↓
+7. Browser prompts: Allow camera + microphone? → Allow
+         ↓
+8. Browser prompts: Allow location? → Allow
+         ↓
+9. Live video feed appears, recording timer starts
    MediaRecorder begins collecting blob chunks every 1s
    GPS coordinates displayed
          ↓
-7. User clicks "End Session"
+10. Customer clicks "End Session"
          ↓
-8. MediaRecorder stops, all tracks stopped
-   Blob assembled from chunks
-   Download link appears (temporary, for testing)
+11. MediaRecorder stops, all tracks stopped
+    Blob assembled from chunks
+    Download link appears (temporary, for testing)
 ```
 
 ---
 
 ## Team Split
 
-This codebase is structured so three people can work in parallel with minimal conflicts.
-
 | Person | Ownership | Files |
 |---|---|---|
-| **P1 — Frontend** | UI shell, video layer, media capture | `dashboard/page.tsx`, `VideoSession.tsx`, `useMediaPermissions.ts` |
+| **P1 — Frontend** | UI shell, admin panel, video layer, media capture | `admin/page.tsx`, `dashboard/page.tsx`, `VideoSession.tsx`, `useMediaPermissions.ts` |
 | **P2 — STT** | Deepgram WebSocket, real-time transcript UI | `hooks/useTranscription.ts` *(coming)*, `components/TranscriptPanel.tsx` *(coming)* |
-| **P3 — Data** | Supabase schema, API routes, blob upload | `app/api/` *(coming)*, Supabase migrations *(coming)* |
+| **P3 — Data** | Supabase schema, migrate session store, blob upload | `app/api/` *(expand)*, Supabase migrations *(coming)* |
 
-The integration point between all three is clean:
+Integration points:
 - P1 produces the `stream` and `audioStream` objects
 - P2 consumes `audioStream` for Deepgram
-- P3 consumes the final video `Blob` and transcript for storage
+- P3 consumes the final video `Blob` and transcript for storage, and takes over from `sessionStore.ts`
 
 ---
 
 ## Roadmap
 
-### Done 
+### Done ✅
 - [x] Next.js + Tailwind + ShadCN scaffold
 - [x] Clerk authentication (sign up, sign in, sign out, route protection)
+- [x] In-memory session store (`sessionStore.ts`)
+- [x] `GET /api/sessions` — list all sessions
+- [x] `POST /api/sessions/create` — create session + send email via Nodemailer/Gmail
+- [x] Admin panel — create sessions, view all sessions with status badges
+- [x] Join page — token validation, status update to `"opened"`, Clerk auth redirect
 - [x] Dashboard shell
 - [x] Camera access
 - [x] Microphone access
@@ -302,20 +377,21 @@ The integration point between all three is clean:
 - [x] Session lifecycle (idle → active → stopped)
 - [x] Permission status UI
 
-### Next — Session 2 
+### Next — Session 3
 - [ ] Deepgram real-time STT via WebSocket
 - [ ] Live transcript panel alongside video
 - [ ] Supabase project setup
+- [ ] Migrate `sessionStore.ts` → Supabase Postgres
 - [ ] Video blob upload to Supabase Storage
 - [ ] Session metadata saved to Supabase Postgres
 - [ ] Transcript saved to database
 - [ ] Location saved to database
+- [ ] Session status updated to `"submitted"` on completion
 
 ### Future
 - [ ] LLM intelligence layer (Claude API) for customer classification
 - [ ] Risk scoring engine
 - [ ] Loan offer generation
-- [ ] Admin dashboard for reviewing sessions
 - [ ] Vercel deployment
 
 ---
@@ -323,6 +399,7 @@ The integration point between all three is clean:
 ## Important Notes
 
 - **Never commit `.env.local`** — it contains secret keys. It is already in `.gitignore` by default with Next.js.
+- **Gmail App Password** — use a Google App Password, not your account password. Generate one at myaccount.google.com → Security → App Passwords.
+- **`sessionStore.ts` is ephemeral** — all sessions are lost when the dev server restarts. This is intentional for the MVP.
 - **Deepgram `mip_opt_out=true`** must be passed in all API calls. This is a financial data application — audio must not be used for Deepgram's model training.
-- The `blob://` download URL in the current MVP is for **testing only**. It is not persistent. Real storage via Supabase comes in the next session.
-- The dashboard is currently a `"use client"` component, so server-side `auth()` is not used. Route protection is handled entirely by the Clerk middleware, which is sufficient for the MVP.
+- The `blob://` download URL in the current MVP is for **testing only**. Real storage via Supabase comes in the next session.

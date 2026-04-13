@@ -11,10 +11,10 @@ export default function DashboardPage() {
         <UserButton />
       </nav>
 
-      <div className="max-w-3xl mx-auto px-4 py-12 space-y-8">
-        <div>
-          <h1 className="text-2xl font-semibold">Video Verification</h1>
-          <p className="text-white/40 text-sm mt-1">
+      <div className="w-full px-8 py-10 space-y-8">
+        <div className="px-1">
+          <h1 className="text-3xl font-semibold">Video Verification</h1>
+          <p className="text-white/40 text-sm mt-2">
             Complete your video verification to proceed.
           </p>
         </div>
