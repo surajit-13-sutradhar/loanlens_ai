@@ -85,19 +85,20 @@ export default function VideoSession() {
     requestAll, stopAll,
   } = useMediaPermissions();
 
-  const videoRef    = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef   = useRef<Blob[]>([]);
-  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const scriptRefs  = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const chatEndRef  = useRef<HTMLDivElement>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scriptRefs = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const [sessionState, setSessionState] = useState<SessionState>("idle");
-  const [elapsed, setElapsed]           = useState(0);
-  const [downloadUrl, setDownloadUrl]   = useState<string | null>(null);
-  const [messages, setMessages]         = useState<Message[]>([]);
-  const [aiTyping, setAiTyping]         = useState(false);
-  const [userTyping, setUserTyping]     = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [aiTyping, setAiTyping] = useState(false);
+  const [userTyping, setUserTyping] = useState(false);
+  const [input, setInput] = useState("");
 
   // Attach camera stream to video element
   useEffect(() => {
@@ -183,6 +184,23 @@ export default function VideoSession() {
     });
 
     scriptRefs.current = refs;
+  };
+
+  // Send message handler
+  const sendMessage = () => {
+    if (!input.trim()) return;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        text: input,
+        ts: new Date(),
+      },
+    ]);
+
+    setInput("");
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -322,22 +340,43 @@ export default function VideoSession() {
             <div ref={chatEndRef} />
           </div>
 
-          {/* STT input hint */}
-          <div className="px-4 py-3 border-t border-white/10 shrink-0">
-            <div className="flex items-center gap-2.5 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5">
-              <span className={`w-2 h-2 rounded-full shrink-0 ${sessionState === "active" ? "bg-red-400 animate-pulse" : "bg-white/20"}`} />
-              <p className="text-xs text-white/25 flex-1">
-                {sessionState === "active"
-                  ? "Listening — speak clearly into your microphone"
-                  : "Microphone inactive"}
-              </p>
-              {sessionState === "active" && micStatus === "granted" && (
-                <span className="text-xs text-white/20 font-mono">STT</span>
-              )}
+          {/* Input area */}
+          <div className="px-3 py-3 border-t border-white/10 shrink-0">
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+              
+              {/* Mic indicator */}
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  sessionState === "active" ? "bg-red-400 animate-pulse" : "bg-white/20"
+                }`}
+              />
+
+              {/* Input */}
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                placeholder={
+                  sessionState === "active"
+                    ? "Type a message or speak..."
+                    : "Start session to chat"
+                }
+                disabled={sessionState !== "active"}
+                className="flex-1 bg-transparent outline-none text-sm text-white/80 placeholder:text-white/30"
+              />
+
+                  {/* Send button */}
+                  <button
+                    onClick={sendMessage}
+                    disabled={!input.trim() || sessionState !== "active"}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-500 disabled:opacity-30 transition"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
       {/* ── Controls ──────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-3">
