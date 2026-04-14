@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
     const groqForm = new FormData();
     groqForm.append("file", file);
-    groqForm.append("model", "whisper-large-v3");       // ← turbo is worse at Hindi
+    groqForm.append("model", "whisper-large-v3");       // <-turbo is worse at Hindi
     groqForm.append("response_format", "json");  
     groqForm.append("language", "hi");                // ← tells Whisper to expect Hindi/Hinglish
     groqForm.append(
