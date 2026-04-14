@@ -1,11 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, FormEvent } from "react";
 import { useMediaPermissions } from "@/hooks/useMediaPermissions";
 import { useTranscription } from "@/hooks/useTranscription";
 import { useFaceMonitor } from "@/hooks/useFaceMonitor";
 
 type SessionState = "idle" | "active" | "stopped";
+
+interface KYCData {
+  name?: string;
+  age?: string;
+  citizenship?: string;
+  employmentStatus?: string;
+  workLocation?: string;
+  jobDescription?: string;
+  salary?: string;
+}
+
+type Message = {
+  id: string;
+  role: "bot" | "user";
+  text: string;
+};
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -34,7 +50,6 @@ function StatusBadge({ label, status }: { label: string; status: "granted" | "de
   );
 }
 
-// ── Face monitor stats bar ────────────────────────────────────────────────────
 function MonitorStat({ label, value, warn }: { label: string; value: number; warn: boolean }) {
   return (
     <div className="flex items-center justify-between text-xs">
@@ -51,37 +66,42 @@ export default function VideoSession() {
   const [elapsed, setElapsed] = useState(0);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
+  // Agent Chat State
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [formData, setFormData] = useState<KYCData>({});
+  const [isComplete, setIsComplete] = useState(false);
+  const [isBotTyping, setIsBotTyping] = useState(false);
+  const [isVideoVerified, setIsVideoVerified] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const blobChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Ref for our auto-submit silence detection timer
+  const autoSubmitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { stream, audioStream, videoStream, cameraStatus, micStatus, location, locationStatus, requestAll, requestLocation, stopAll } = useMediaPermissions();
+  
+  // We don't want the hook to auto-start listening on mount, we will control it manually
   const { transcript, isListening, isTranscribing, startListening, stopListening, clearTranscript } = useTranscription({
     silenceThreshold: 0.012,
     silenceDurationMs: 1400,
-<<<<<<< HEAD
-=======
-    maxChunkMs: 600,
->>>>>>> 5f93c45ae950b3044f7334f46d20c30af980f781
   });
-  const { stats: faceStats, startMonitoring, stopMonitoring, triggerAgeDetection } = useFaceMonitor();
+  
+  const { stats: faceStats, startMonitoring, stopMonitoring } = useFaceMonitor();
 
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript]);
-
+  // ── 1. Video Stream ──
   useEffect(() => {
     if (videoRef.current && videoStream) {
       videoRef.current.srcObject = videoStream;
     }
   }, [videoStream]);
 
-  // Start face monitoring once video element is ready and session is active
   useEffect(() => {
     if (sessionState === "active" && videoRef.current && videoStream) {
-      // Small delay to ensure video is playing
       const t = setTimeout(() => {
         if (videoRef.current) startMonitoring(videoRef.current);
       }, 1500);
@@ -89,20 +109,19 @@ export default function VideoSession() {
     }
   }, [sessionState, videoStream, startMonitoring]);
 
-  const handleStart = useCallback(async () => {
-    const gotMedia = await requestAll();
-    if (!gotMedia) return;
-    requestLocation();
-    setSessionState("active");
-    setElapsed(0);
-    setDownloadUrl(null);
-    clearTranscript();
-    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-  }, [requestAll, requestLocation, clearTranscript]);
+  // ── 2. Verification Gate (Wait for working video) ──
+  useEffect(() => {
+    if (sessionState === "active" && !isVideoVerified) {
+      if (faceStats.totalSecs >= 2 && !faceStats.warning) {
+        setIsVideoVerified(true);
+        triggerBotResponse([]); // Kick off the first question
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionState, faceStats, isVideoVerified]);
 
   useEffect(() => {
     if (sessionState !== "active" || !stream || !audioStream) return;
-
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
       ? "video/webm;codecs=vp9,opus"
       : "video/webm";
@@ -112,13 +131,126 @@ export default function VideoSession() {
     mr.ondataavailable = (e) => { if (e.data.size > 0) blobChunksRef.current.push(e.data); };
     mr.start(1000);
     mediaRecorderRef.current = mr;
-    startListening(audioStream);
+    
+    // We purposefully DO NOT start listening here anymore. 
+    // We let the bot ask the first question before turning the mic on.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionState, stream, audioStream]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isBotTyping]);
+
+
+  // ── 3. Auto-Submit & Transcription Sync ──
+  useEffect(() => {
+    if (isListening && transcript.length > 0 && !isBotTyping) {
+      const combinedText = transcript.map((t) => t.text).join(" ");
+      setChatInput(combinedText);
+
+      // Clear existing timer if they are still speaking/new text arrives
+      // if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+
+      // Set a 2.5-second timer. If no new text arrives in 2.5s, assume they are done and submit.
+      autoSubmitTimerRef.current = setTimeout(() => {
+        if (combinedText.trim()) {
+          processUserResponse(combinedText.trim());
+        }
+      }, 500);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript, isListening, isBotTyping]);
+
+  // ── 4. Agent Communication & State Handling ──
+  const processUserResponse = async (userText: string) => {
+    if (isComplete || sessionState !== "active" || isBotTyping) return;
+
+    // Clear the auto-submit timer so it doesn't fire twice
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+
+    // CRITICAL: Stop listening immediately to flush the audio buffer and prevent bleed-over
+    await stopListening();
+
+    setChatInput("");
+    clearTranscript();
+
+    const newMessages: Message[] = [...messages, { id: Date.now().toString(), role: "user", text: userText }];
+    setMessages(newMessages);
+
+    await triggerBotResponse(newMessages);
+  };
+
+  const triggerBotResponse = async (currentMessages: Message[]) => {
+    setIsBotTyping(true);
+    try {
+      const apiMessages = currentMessages.map(m => ({ role: m.role === "bot" ? "assistant" : "user", content: m.text }));
+      
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: apiMessages, currentData: formData }),
+      });
+
+      if (!res.ok) throw new Error("API failed");
+      const data = await res.json();
+
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: "bot", text: data.reply }]);
+      if (data.extractedData) setFormData(data.extractedData);
+      
+      if (data.isComplete) {
+        setIsComplete(true);
+        setTimeout(() => {
+          alert(`KYC Extraction Complete:\n\n${JSON.stringify(data.extractedData, null, 2)}`);
+        }, 500);
+      } else if (audioStream) {
+        // Only restart the microphone AFTER the bot has finished talking
+        startListening(audioStream);
+      }
+    } catch (err) {
+      console.error(err);
+      setMessages(prev => [...prev, { id: Date.now().toString(), role: "bot", text: "I'm having trouble connecting. Could you repeat that?" }]);
+      if (audioStream) startListening(audioStream); // Restart mic so they can retry
+    } finally {
+      setIsBotTyping(false);
+    }
+  };
+
+  const handleManualSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (chatInput.trim()) {
+      processUserResponse(chatInput.trim());
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setChatInput(e.target.value);
+    // If the user manually types to fix an error, cancel the auto-submit timer
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+  };
+
+  // ── 5. Standard Controls ──
+  const handleStart = useCallback(async () => {
+    const gotMedia = await requestAll();
+    if (!gotMedia) return;
+    requestLocation();
+    
+    setMessages([]);
+    setChatInput("");
+    setFormData({});
+    setIsComplete(false);
+    setIsVideoVerified(false);
+    clearTranscript();
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+
+    setSessionState("active");
+    setElapsed(0);
+    setDownloadUrl(null);
+    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+  }, [requestAll, requestLocation, clearTranscript]);
+
   const handleStop = useCallback(async () => {
     if (timerRef.current) clearInterval(timerRef.current);
-
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
     stopMonitoring();
 
     const mr = mediaRecorderRef.current;
@@ -139,6 +271,7 @@ export default function VideoSession() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
       stopAll();
       stopMonitoring();
     };
@@ -148,26 +281,22 @@ export default function VideoSession() {
   return (
     <div className="flex flex-col gap-6">
 
-      {/* ── Permission badges ── */}
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge label="Camera" status={cameraStatus === "granted" ? "granted" : cameraStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
         <StatusBadge label="Microphone" status={micStatus === "granted" ? "granted" : micStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
         <StatusBadge label="Location" status={locationStatus === "granted" ? "granted" : locationStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
-        {isListening && <StatusBadge label="STT Active" status="granted" />}
-        {isTranscribing && <StatusBadge label="Transcribing…" status="pending" />}
-        {/* Face monitor warning badge */}
+        {isListening && <StatusBadge label="Listening for response..." status="granted" />}
+        {isBotTyping && <StatusBadge label="Agent Processing" status="pending" />}
         {sessionState === "active" && faceStats.warning && (
           <StatusBadge label={faceStats.warning} status="denied" />
         )}
       </div>
 
-      {/* ── Main layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-4 items-start">
 
-        {/* ── Left: Video + face monitor ── */}
+        {/* Left: Video */}
         <div className="flex flex-col gap-4">
           <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 aspect-video">
-
             <video
               ref={videoRef}
               autoPlay
@@ -194,9 +323,14 @@ export default function VideoSession() {
               </div>
             )}
 
-            {/* Face warning overlay */}
+            {sessionState === "active" && !isVideoVerified && !faceStats.warning && (
+               <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">
+                  <p className="text-white font-medium text-sm animate-pulse">Verifying presence...</p>
+               </div>
+            )}
+
             {sessionState === "active" && faceStats.warning && (
-              <div className="absolute bottom-14 left-0 right-0 flex justify-center">
+              <div className="absolute bottom-14 left-0 right-0 flex justify-center z-20">
                 <div className="bg-red-500/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-xl">
                   {faceStats.warning}
                 </div>
@@ -204,26 +338,21 @@ export default function VideoSession() {
             )}
 
             {location && sessionState === "active" && (
-              <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-xl px-3 py-1.5">
+              <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-xl px-3 py-1.5 z-10">
                 <p className="text-white/50 text-xs font-mono">{location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}</p>
               </div>
             )}
           </div>
 
-          {/* ── Face monitor stats (shown during and after session) ── */}
           {(sessionState === "active" || sessionState === "stopped") && (
             <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 flex flex-col gap-2">
               <p className="text-xs font-medium text-white/40 uppercase tracking-wider mb-1">Face Monitor</p>
               <MonitorStat label="No face detected" value={faceStats.noFaceSecs} warn={true} />
               <MonitorStat label="Multiple faces" value={faceStats.multiFaceSecs} warn={true} />
               <MonitorStat label="Liveness failed" value={faceStats.notLiveSecs} warn={true} />
-              <div className="border-t border-white/5 pt-2 mt-1">
-                <MonitorStat label="Total session" value={faceStats.totalSecs} warn={false} />
-              </div>
             </div>
           )}
 
-          {/* ── Controls ── */}
           <div className="flex items-center gap-3">
             {sessionState === "idle" && (
               <button onClick={handleStart} className="bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all text-white text-sm font-medium rounded-xl px-6 py-2.5">
@@ -254,55 +383,85 @@ export default function VideoSession() {
           </div>
         </div>
 
-        {/* ── Right: Transcript ── */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 flex flex-col h-[460px]">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+        {/* Right: Agent Chat */}
+        <div className="rounded-2xl border border-white/10 bg-white/5 flex flex-col h-[480px] overflow-hidden">
+          
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 bg-black/20">
             <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-              <span className="text-sm font-medium text-white/70">Live Transcript</span>
+              <span className="relative flex h-2 w-2">
+                <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${sessionState === "active" && isVideoVerified && !isComplete ? "animate-ping bg-emerald-400" : "bg-white/30"}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${sessionState === "active" && isVideoVerified && !isComplete ? "bg-emerald-500" : "bg-white/40"}`}></span>
+              </span>
+              <span className="text-sm font-medium text-white/70">Agent Onboarding</span>
             </div>
-            <div className="flex items-center gap-2">
-              {isTranscribing && <span className="text-xs text-yellow-400/80 animate-pulse">processing…</span>}
-              {transcript.length > 0 && sessionState === "stopped" && (
-                <button onClick={clearTranscript} className="text-xs text-white/30 hover:text-white/60 transition-colors">Clear</button>
-              )}
-            </div>
+            <span className="text-xs text-emerald-400 font-mono">
+              {Object.keys(formData).length} / 7 Fields
+            </span>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
-            {transcript.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center gap-3 text-center">
-                <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                  </svg>
-                </div>
-                <p className="text-white/20 text-xs leading-relaxed max-w-[180px]">
-                  {sessionState === "idle" ? "Start a session — your speech will appear here automatically."
-                    : sessionState === "active" ? "Listening… speak clearly and Whisper will transcribe your words."
-                    : "No speech was captured in this session."}
-                </p>
-              </div>
-            ) : (
-              transcript.map((entry) => (
-                <div key={entry.id} className="group flex flex-col gap-0.5">
-                  <span className="text-[10px] text-white/20 font-mono">
-                    {entry.timestamp.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </span>
-                  <p className="text-sm text-white/80 leading-relaxed">{entry.text}</p>
-                </div>
-              ))
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
+            {messages.length === 0 && sessionState === "idle" && (
+               <div className="h-full flex flex-col items-center justify-center text-center">
+                  <p className="text-white/30 text-sm">Start the session to begin the automated interview.</p>
+               </div>
             )}
-            <div ref={transcriptEndRef} />
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex w-full ${msg.role === "bot" ? "justify-start" : "justify-end"}`}>
+                <div className={`max-w-[85%] px-4 py-2.5 text-sm leading-relaxed ${
+                    msg.role === "bot"
+                      ? "bg-white/10 text-white/80 rounded-2xl rounded-tl-sm border border-white/5"
+                      : "bg-blue-600 text-white rounded-2xl rounded-tr-sm shadow-md"
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+            {isBotTyping && (
+              <div className="flex w-full justify-start">
+                 <div className="px-4 py-2.5 bg-white/5 rounded-2xl rounded-tl-sm border border-white/5 flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce"></span>
+                    <span className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{animationDelay: "0.15s"}}></span>
+                    <span className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{animationDelay: "0.3s"}}></span>
+                 </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
           </div>
 
-          <div className="px-4 py-2.5 border-t border-white/10 shrink-0">
-            <p className="text-[10px] text-white/20 text-center">
-              {transcript.length === 0 ? "Powered by Groq Whisper" : `${transcript.length} segment${transcript.length !== 1 ? "s" : ""} captured · Groq Whisper`}
-            </p>
-          </div>
+          <form onSubmit={handleManualSubmit} className="p-3 border-t border-white/10 bg-black/20 flex gap-2 shrink-0 items-center relative">
+            
+            {/* Auto-submit progress indicator */}
+            {isListening && chatInput.trim() && !isBotTyping && (
+               <div className="absolute -top-6 left-4 text-[10px] text-white/40 flex items-center gap-1.5 animate-pulse">
+                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span> Sending shortly...
+               </div>
+            )}
+
+            <input
+              type="text"
+              value={chatInput}
+              onChange={handleInputChange}
+              disabled={sessionState !== "active" || isComplete || !isVideoVerified || isBotTyping}
+              placeholder={
+                sessionState === "idle" ? "Waiting to start..." 
+                : !isVideoVerified ? "Verifying video..." 
+                : isComplete ? "Verification complete." 
+                : isBotTyping ? "Agent is typing..." 
+                : "Speak to answer..."
+              }
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30 focus:bg-white/10 transition-all disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!chatInput.trim() || sessionState !== "active" || isComplete || !isVideoVerified || isBotTyping}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 active:scale-95 transition-all text-white p-2.5 rounded-xl flex items-center justify-center"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+              </svg>
+            </button>
+          </form>
         </div>
       </div>
     </div>
