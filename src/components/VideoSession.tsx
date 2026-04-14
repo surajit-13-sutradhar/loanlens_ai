@@ -66,7 +66,6 @@ export default function VideoSession() {
   const [elapsed, setElapsed] = useState(0);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
-  // Agent Chat State
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [formData, setFormData] = useState<KYCData>({});
@@ -79,13 +78,10 @@ export default function VideoSession() {
   const blobChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  
-  // Ref for our auto-submit silence detection timer
   const autoSubmitTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const { stream, audioStream, videoStream, cameraStatus, micStatus, location, locationStatus, requestAll, requestLocation, stopAll } = useMediaPermissions();
   
-  // We don't want the hook to auto-start listening on mount, we will control it manually
   const { transcript, isListening, isTranscribing, startListening, stopListening, clearTranscript } = useTranscription({
     silenceThreshold: 0.012,
     silenceDurationMs: 1400,
@@ -93,7 +89,7 @@ export default function VideoSession() {
   
   const { stats: faceStats, startMonitoring, stopMonitoring } = useFaceMonitor();
 
-  // ── 1. Video Stream ──
+  // ── 1. Video & Recording Stream ──
   useEffect(() => {
     if (videoRef.current && videoStream) {
       videoRef.current.srcObject = videoStream;
@@ -109,17 +105,6 @@ export default function VideoSession() {
     }
   }, [sessionState, videoStream, startMonitoring]);
 
-  // ── 2. Verification Gate (Wait for working video) ──
-  useEffect(() => {
-    if (sessionState === "active" && !isVideoVerified) {
-      if (faceStats.totalSecs >= 2 && !faceStats.warning) {
-        setIsVideoVerified(true);
-        triggerBotResponse([]); // Kick off the first question
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionState, faceStats, isVideoVerified]);
-
   useEffect(() => {
     if (sessionState !== "active" || !stream || !audioStream) return;
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
@@ -131,46 +116,62 @@ export default function VideoSession() {
     mr.ondataavailable = (e) => { if (e.data.size > 0) blobChunksRef.current.push(e.data); };
     mr.start(1000);
     mediaRecorderRef.current = mr;
-    
-    // We purposefully DO NOT start listening here anymore. 
-    // We let the bot ask the first question before turning the mic on.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionState, stream, audioStream]);
 
+  // ── 2. Verification Gate ──
+  useEffect(() => {
+    if (sessionState === "active" && !isVideoVerified) {
+      if (faceStats.totalSecs >= 2 && !faceStats.warning) {
+        setIsVideoVerified(true);
+        triggerBotResponse([]); 
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionState, faceStats, isVideoVerified]);
+
+  // ── 3. DECLARATIVE MICROPHONE CONTROL (THE FIX) ──
+  // This constantly watches the state. If we are waiting for the user to speak, it ensures the mic is ON.
+  useEffect(() => {
+    if (sessionState === "active" && isVideoVerified && !isComplete && !isBotTyping) {
+      if (!isListening && audioStream) {
+        // A tiny 100ms buffer to ensure MediaRecorder isn't locked by a previous cleanup
+        const t = setTimeout(() => startListening(audioStream), 100);
+        return () => clearTimeout(t);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionState, isVideoVerified, isComplete, isBotTyping, isListening, audioStream]);
+
+
+  // ── 4. Chat & Auto-Submit Logic ──
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isBotTyping]);
 
-
-  // ── 3. Auto-Submit & Transcription Sync ──
   useEffect(() => {
     if (isListening && transcript.length > 0 && !isBotTyping) {
       const combinedText = transcript.map((t) => t.text).join(" ");
       setChatInput(combinedText);
 
-      // Clear existing timer if they are still speaking/new text arrives
-      // if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+      if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
 
-      // Set a 2.5-second timer. If no new text arrives in 2.5s, assume they are done and submit.
       autoSubmitTimerRef.current = setTimeout(() => {
         if (combinedText.trim()) {
           processUserResponse(combinedText.trim());
         }
-      }, 500);
+      }, 2500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transcript, isListening, isBotTyping]);
 
-  // ── 4. Agent Communication & State Handling ──
   const processUserResponse = async (userText: string) => {
     if (isComplete || sessionState !== "active" || isBotTyping) return;
 
-    // Clear the auto-submit timer so it doesn't fire twice
     if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
 
-    // CRITICAL: Stop listening immediately to flush the audio buffer and prevent bleed-over
+    // Stop listening immediately to cut off the audio buffer
     await stopListening();
-
     setChatInput("");
     clearTranscript();
 
@@ -181,7 +182,7 @@ export default function VideoSession() {
   };
 
   const triggerBotResponse = async (currentMessages: Message[]) => {
-    setIsBotTyping(true);
+    setIsBotTyping(true); // <--- This immediately tells our declarative effect to NOT turn the mic on yet
     try {
       const apiMessages = currentMessages.map(m => ({ role: m.role === "bot" ? "assistant" : "user", content: m.text }));
       
@@ -199,36 +200,30 @@ export default function VideoSession() {
       
       if (data.isComplete) {
         setIsComplete(true);
-        setTimeout(() => {
-          alert(`KYC Extraction Complete:\n\n${JSON.stringify(data.extractedData, null, 2)}`);
-        }, 500);
-      } else if (audioStream) {
-        // Only restart the microphone AFTER the bot has finished talking
-        startListening(audioStream);
+        setTimeout(() => alert(`KYC Extraction Complete:\n\n${JSON.stringify(data.extractedData, null, 2)}`), 500);
       }
     } catch (err) {
       console.error(err);
       setMessages(prev => [...prev, { id: Date.now().toString(), role: "bot", text: "I'm having trouble connecting. Could you repeat that?" }]);
-      if (audioStream) startListening(audioStream); // Restart mic so they can retry
     } finally {
-      setIsBotTyping(false);
+      // <--- When this is set to false, our declarative effect kicks in and automatically restarts the mic
+      setIsBotTyping(false); 
     }
   };
 
-  const handleManualSubmit = (e: FormEvent) => {
+  // ── 5. Standard Event Handlers ──
+  const handleManualSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (chatInput.trim()) {
-      processUserResponse(chatInput.trim());
+      await processUserResponse(chatInput.trim());
     }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setChatInput(e.target.value);
-    // If the user manually types to fix an error, cancel the auto-submit timer
     if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
   };
 
-  // ── 5. Standard Controls ──
   const handleStart = useCallback(async () => {
     const gotMedia = await requestAll();
     if (!gotMedia) return;
@@ -280,7 +275,6 @@ export default function VideoSession() {
 
   return (
     <div className="flex flex-col gap-6">
-
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge label="Camera" status={cameraStatus === "granted" ? "granted" : cameraStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
         <StatusBadge label="Microphone" status={micStatus === "granted" ? "granted" : micStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
@@ -293,8 +287,7 @@ export default function VideoSession() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-4 items-start">
-
-        {/* Left: Video */}
+        {/* Left Column: Video & Stats */}
         <div className="flex flex-col gap-4">
           <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 aspect-video">
             <video
@@ -383,9 +376,8 @@ export default function VideoSession() {
           </div>
         </div>
 
-        {/* Right: Agent Chat */}
+        {/* Right Column: Agent Chat */}
         <div className="rounded-2xl border border-white/10 bg-white/5 flex flex-col h-[480px] overflow-hidden">
-          
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 bg-black/20">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
@@ -430,8 +422,6 @@ export default function VideoSession() {
           </div>
 
           <form onSubmit={handleManualSubmit} className="p-3 border-t border-white/10 bg-black/20 flex gap-2 shrink-0 items-center relative">
-            
-            {/* Auto-submit progress indicator */}
             {isListening && chatInput.trim() && !isBotTyping && (
                <div className="absolute -top-6 left-4 text-[10px] text-white/40 flex items-center gap-1.5 animate-pulse">
                   <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span> Sending shortly...
