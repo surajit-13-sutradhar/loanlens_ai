@@ -61,6 +61,10 @@ export default function VideoSession() {
   const { transcript, isListening, isTranscribing, startListening, stopListening, clearTranscript } = useTranscription({
     silenceThreshold: 0.012,
     silenceDurationMs: 1400,
+<<<<<<< HEAD
+=======
+    maxChunkMs: 600,
+>>>>>>> 5f93c45ae950b3044f7334f46d20c30af980f781
   });
   const { stats: faceStats, startMonitoring, stopMonitoring, triggerAgeDetection } = useFaceMonitor();
 
