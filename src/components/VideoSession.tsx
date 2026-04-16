@@ -7,7 +7,7 @@ import { useFaceMonitor } from "@/hooks/useFaceMonitor";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type SessionState = "idle" | "active" | "stopped" | "completed"; // ✅ added "completed"
+type SessionState = "idle" | "active" | "stopped" | "completed";
 type VerificationStep = "idle" | "analyzing" | "completed";
 
 interface ExtractedKYCData {
@@ -52,6 +52,44 @@ interface LoanDecision {
 
 type Message = { id: string; role: "bot" | "user"; text: string };
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PLAN_ACCENT: Record<string, string> = {
+  Safe:     "hover:border-emerald-500/40",
+  Balanced: "hover:border-blue-500/40",
+  Max:      "hover:border-amber-500/40",
+};
+
+const PLAN_LABEL_COLOR: Record<string, string> = {
+  Safe:     "text-emerald-400",
+  Balanced: "text-blue-400",
+  Max:      "text-amber-400",
+};
+
+const PLAN_SELECTED_RING: Record<string, string> = {
+  Safe:     "border-emerald-500/60 shadow-[0_0_24px_-6px_rgba(52,211,153,0.35)]",
+  Balanced: "border-blue-500/60 shadow-[0_0_24px_-6px_rgba(96,165,250,0.35)]",
+  Max:      "border-amber-500/60 shadow-[0_0_24px_-6px_rgba(251,191,36,0.35)]",
+};
+
+const PLAN_DOT: Record<string, string> = {
+  Safe:     "bg-emerald-500",
+  Balanced: "bg-blue-500",
+  Max:      "bg-amber-500",
+};
+
+const FOIR_COLOR: Record<string, string> = {
+  safe:     "bg-emerald-400",
+  moderate: "bg-amber-400",
+  risky:    "bg-red-400",
+};
+
+const FOIR_TEXT_COLOR: Record<string, string> = {
+  safe:     "text-emerald-400",
+  moderate: "text-amber-400",
+  risky:    "text-red-400",
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatTime(seconds: number) {
@@ -66,7 +104,13 @@ function inr(amount: number) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusBadge({ label, status }: { label: string; status: "granted" | "denied" | "pending" | "idle" }) {
+function StatusBadge({
+  label,
+  status,
+}: {
+  label: string;
+  status: "granted" | "denied" | "pending" | "idle";
+}) {
   const colors: Record<string, string> = {
     granted: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
     denied:  "bg-red-500/20 text-red-400 border-red-500/30",
@@ -80,20 +124,109 @@ function StatusBadge({ label, status }: { label: string; status: "granted" | "de
     idle:    "bg-white/20",
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium ${colors[status]}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium ${colors[status]}`}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${dots[status]}`} />
       {label}
     </span>
   );
 }
 
-function MonitorStat({ label, value, warn }: { label: string; value: number; warn: boolean }) {
+function MonitorStat({
+  label,
+  value,
+  warn,
+}: {
+  label: string;
+  value: number;
+  warn: boolean;
+}) {
   return (
     <div className="flex items-center justify-between text-xs">
       <span className="text-white/40">{label}</span>
-      <span className={warn && value > 0 ? "text-red-400 font-mono font-semibold" : "text-white/50 font-mono"}>
+      <span
+        className={
+          warn && value > 0
+            ? "text-red-400 font-mono font-semibold"
+            : "text-white/50 font-mono"
+        }
+      >
         {formatTime(value)}
       </span>
+    </div>
+  );
+}
+
+// ─── LoanOfferCard ────────────────────────────────────────────────────────────
+// Receives selectedPlan + onSelect as props — no closure over external state
+
+function LoanOfferCard({
+  option,
+  selectedPlan,
+  onSelect,
+}: {
+  option: LoanOption;
+  selectedPlan: string | null;
+  onSelect: (opt: LoanOption) => void;
+}) {
+  const isSelected = selectedPlan === option.plan;
+
+  return (
+    <div
+      onClick={() => onSelect(option)}
+      className={`relative group p-6 rounded-2xl border transition-all cursor-pointer overflow-hidden ${
+        PLAN_ACCENT[option.plan]
+      } ${
+        isSelected
+          ? `bg-white/10 ${PLAN_SELECTED_RING[option.plan]}`
+          : "bg-white/5 border-white/10"
+      }`}
+    >
+      {/* Selection indicator */}
+      <div
+        className={`absolute top-5 left-5 w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center ${
+          isSelected
+            ? `border-current ${PLAN_DOT[option.plan].replace("bg-", "border-").replace("-500", "-500")}`
+            : "border-white/20 group-hover:border-white/40"
+        }`}
+      >
+        <div
+          className={`w-2.5 h-2.5 rounded-full transition-all ${
+            isSelected ? PLAN_DOT[option.plan] : "bg-transparent"
+          }`}
+        />
+      </div>
+
+      {/* Plan header */}
+      <div className="flex justify-end items-center mb-8 pl-8">
+        <span
+          className={`text-[11px] font-bold uppercase tracking-widest ${PLAN_LABEL_COLOR[option.plan]}`}
+        >
+          {option.plan} Plan
+        </span>
+        <span className="text-xs font-bold text-white/50 bg-white/5 border border-white/10 px-3 py-1 rounded-md ml-3">
+          {option.annualInterestRate}% APR
+        </span>
+      </div>
+
+      {/* Principal amount */}
+      <p className="text-3xl font-mono font-bold text-white mb-2">
+        {inr(option.principalAmount)}
+      </p>
+
+      {/* EMI description */}
+      <p className="text-white/50 text-xs mb-2">
+        Pay{" "}
+        <span className="text-white/80 font-mono font-medium">
+          {inr(option.monthlyEmi)}
+        </span>{" "}
+        per month over{" "}
+        <span className="text-white/80 font-medium">
+          {option.tenureMonths} months
+        </span>
+        .
+      </p>
     </div>
   );
 }
@@ -115,9 +248,10 @@ export default function VideoSession() {
   const [isConsentOpen, setIsConsentOpen]       = useState(false);
   const [verificationStep, setVerificationStep] = useState<VerificationStep>("idle");
   const [detectedAge, setDetectedAge]           = useState<string | null>(null);
-  // ✅ offers state kept — modal moved inside return
   const [offers, setOffers]                     = useState<LoanOption[] | null>(null);
   const [showOfferModal, setShowOfferModal]     = useState(false);
+  // ✅ selectedOffer lives here in the parent — passed down as props to LoanOfferCard
+  const [selectedOffer, setSelectedOffer]       = useState<LoanOption | null>(null);
 
   const videoRef         = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -138,14 +272,30 @@ export default function VideoSession() {
     startListening, stopListening, clearTranscript,
   } = useTranscription({ silenceThreshold: 0.012, silenceDurationMs: 1400 });
 
-  const { stats: faceStats, startMonitoring, stopMonitoring, triggerAgeDetection } = useFaceMonitor();
+  const {
+    stats: faceStats,
+    startMonitoring,
+    stopMonitoring,
+    triggerAgeDetection,
+  } = useFaceMonitor();
 
-  // ── Video stream → <video> ───────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────────
+  const fieldsCaptured = Object.values(formData).filter(
+    (v) => v !== null && v !== undefined
+  ).length;
+  const isRejected = isComplete && decision?.decision === "REJECT";
+  // ✅ isApproved defined here — used in the offer modal condition
+  const isApproved =
+    isComplete &&
+    (decision?.decision === "APPROVE" || decision?.decision === "REVIEW");
+
+  // ── Video stream → <video> ────────────────────────────────────────────────────
   useEffect(() => {
-    if (videoRef.current && videoStream) videoRef.current.srcObject = videoStream;
+    if (videoRef.current && videoStream)
+      videoRef.current.srcObject = videoStream;
   }, [videoStream]);
 
-  // ── Face monitor ─────────────────────────────────────────────────────────────
+  // ── Face monitor ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (sessionState === "active" && videoRef.current && videoStream) {
       const t = setTimeout(() => {
@@ -159,17 +309,25 @@ export default function VideoSession() {
   useEffect(() => {
     if (sessionState !== "active" || !stream || !audioStream) return;
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-      ? "video/webm;codecs=vp9,opus" : "video/webm";
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
     const mr = new MediaRecorder(stream, { mimeType });
     blobChunksRef.current = [];
-    mr.ondataavailable = (e) => { if (e.data.size > 0) blobChunksRef.current.push(e.data); };
+    mr.ondataavailable = (e) => {
+      if (e.data.size > 0) blobChunksRef.current.push(e.data);
+    };
     mr.start(1000);
     mediaRecorderRef.current = mr;
   }, [sessionState, stream, audioStream]);
 
-  // ── Declarative mic: ON when bot is idle ─────────────────────────────────────
+  // ── Declarative mic: ON when bot is idle ──────────────────────────────────────
   useEffect(() => {
-    if (sessionState === "active" && isVideoVerified && !isComplete && !isBotTyping) {
+    if (
+      sessionState === "active" &&
+      isVideoVerified &&
+      !isComplete &&
+      !isBotTyping
+    ) {
       if (!isListening && audioStream) {
         const t = setTimeout(() => startListening(audioStream), 100);
         return () => clearTimeout(t);
@@ -193,50 +351,65 @@ export default function VideoSession() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isBotTyping]);
 
-  // ── Agent API ─────────────────────────────────────────────────────────────────
-  const triggerBotResponse = useCallback(async (currentMessages: Message[]) => {
-    setIsBotTyping(true);
-    try {
-      const res = await fetch("/api/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: currentMessages.map((m) => ({
-            role: m.role === "bot" ? "assistant" : "user",
-            content: m.text,
-          })),
-          currentData: formData,
-        }),
-      });
-      if (!res.ok) throw new Error("API failed");
-      const data = await res.json();
-      setMessages((prev) => [...prev, { id: Date.now().toString(), role: "bot", text: data.reply }]);
-      if (data.extractedData)  setFormData(data.extractedData);
-      if (data.currentSection) setCurrentSection(data.currentSection);
-      if (data.isComplete) {
-        setIsComplete(true);
-        if (data.loanDecision) {
-          setDecision(data.loanDecision);
-          // ✅ If approved/review AND loan options exist, show the offer modal
-          if (
-            data.loanDecision.decision !== "REJECT" &&
-            data.loanDecision.loanOptions?.length
-          ) {
-            setOffers(data.loanDecision.loanOptions);
-            setShowOfferModal(true);
+  // ── Agent API ──────────────────────────────────────────────────────────────────
+  const triggerBotResponse = useCallback(
+    async (currentMessages: Message[]) => {
+      setIsBotTyping(true);
+      try {
+        const res = await fetch("/api/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: currentMessages.map((m) => ({
+              role: m.role === "bot" ? "assistant" : "user",
+              content: m.text,
+            })),
+            currentData: formData,
+          }),
+        });
+        if (!res.ok) throw new Error("API failed");
+        const data = await res.json();
+        setMessages((prev) => [
+          ...prev,
+          { id: Date.now().toString(), role: "bot", text: data.reply },
+        ]);
+        if (data.extractedData) setFormData(data.extractedData);
+        if (data.currentSection) setCurrentSection(data.currentSection);
+        if (data.isComplete) {
+          setIsComplete(true);
+          if (data.loanDecision) {
+            setDecision(data.loanDecision);
+            if (
+              data.loanDecision.decision !== "REJECT" &&
+              data.loanDecision.loanOptions?.length
+            ) {
+              setOffers(data.loanDecision.loanOptions);
+              setSelectedOffer(null); // reset selection on new offers
+              setShowOfferModal(true);
+            }
           }
         }
+      } catch {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: "bot",
+            text: "I'm having trouble connecting. Could you repeat that?",
+          },
+        ]);
+      } finally {
+        setIsBotTyping(false);
       }
-    } catch {
-      setMessages((prev) => [...prev, { id: Date.now().toString(), role: "bot", text: "I'm having trouble connecting. Could you repeat that?" }]);
-    } finally {
-      setIsBotTyping(false);
-    }
-  }, [formData]);
+    },
+    [formData]
+  );
 
-  useEffect(() => { triggerBotRef.current = triggerBotResponse; }, [triggerBotResponse]);
+  useEffect(() => {
+    triggerBotRef.current = triggerBotResponse;
+  }, [triggerBotResponse]);
 
-  // ── Verification flow ────────────────────────────────────────────────────────
+  // ── Verification flow ─────────────────────────────────────────────────────────
   const runVerification = async () => {
     setVerificationStep("analyzing");
     let verified = false;
@@ -260,7 +433,9 @@ export default function VideoSession() {
       triggerBotResponse([]);
     } else {
       setVerificationStep("idle");
-      alert("Verification timed out. Please ensure you are in a well-lit area and try again.");
+      alert(
+        "Verification timed out. Please ensure you are in a well-lit area and try again."
+      );
     }
   };
 
@@ -270,7 +445,10 @@ export default function VideoSession() {
     await stopListening();
     clearTranscript();
     setChatInput("");
-    const newMessages: Message[] = [...messages, { id: Date.now().toString(), role: "user", text: userText }];
+    const newMessages: Message[] = [
+      ...messages,
+      { id: Date.now().toString(), role: "user", text: userText },
+    ];
     setMessages(newMessages);
     await triggerBotResponse(newMessages);
   };
@@ -287,6 +465,29 @@ export default function VideoSession() {
       const text = chatInput.trim();
       if (text) processUserResponse(text);
     }
+  };
+
+  // ── Offer selection ───────────────────────────────────────────────────────────
+  // ✅ Uses formData (not undefined extractedData)
+  const handleSelection = async (
+    offer: LoanOption | null,
+    status: "accepted" | "rejected"
+  ) => {
+    console.log(`User ${status} the offer:`, offer);
+    stopMonitoring();
+    if (videoRef.current?.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach((track) => track.stop());
+    }
+    const finalPayload = {
+      userData: formData,
+      selection: offer,
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    console.log("Final payload for admin:", finalPayload);
+    setShowOfferModal(false);
+    setSessionState("completed");
   };
 
   // ── Session controls ──────────────────────────────────────────────────────────
@@ -332,30 +533,12 @@ export default function VideoSession() {
     setDownloadUrl(null);
     setDecision(null);
     setOffers(null);
+    setSelectedOffer(null);
     setShowOfferModal(false);
     setVerificationStep("idle");
     setDetectedAge(null);
     setIsConsentOpen(true);
   }, [clearTranscript]);
-
-  // ✅ Fixed: was referencing undefined `extractedData`, now uses `formData`
-  const handleSelection = async (offer: LoanOption | null, status: "accepted" | "rejected") => {
-    console.log(`User ${status} the offer:`, offer);
-    stopMonitoring();
-    if (videoRef.current?.srcObject) {
-      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-      tracks.forEach((track) => track.stop());
-    }
-    const finalPayload = {
-      userData: formData, // ✅ was `extractedData` (undefined)
-      selection: offer,
-      status,
-      timestamp: new Date().toISOString(),
-    };
-    console.log("Final payload for admin:", finalPayload);
-    setShowOfferModal(false);
-    setSessionState("completed");
-  };
 
   useEffect(() => {
     return () => {
@@ -365,15 +548,11 @@ export default function VideoSession() {
     };
   }, []);
 
-  // ─── Derived ──────────────────────────────────────────────────────────────────
-  const fieldsCaptured = Object.values(formData).filter((v) => v !== null && v !== undefined).length;
-  const isRejected     = isComplete && decision?.decision === "REJECT";
-
   // ─── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-6">
 
-      {/* ── Consent modal ── */}
+      {/* ── Consent modal ─────────────────────────────────────────────────────── */}
       {isConsentOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <div className="bg-[#121212] border border-white/10 rounded-3xl max-w-md w-full p-8 shadow-2xl">
@@ -384,7 +563,9 @@ export default function VideoSession() {
             </div>
             <h2 className="text-2xl font-semibold text-white mb-3">Video KYC Consent</h2>
             <p className="text-white/60 text-sm leading-relaxed mb-4">
-              To proceed with your loan application, we need to record a short video session for identity verification. By clicking "I Agree," you consent to:
+              To proceed with your loan application, we need to record a short
+              video session for identity verification. By clicking "I Agree," you
+              consent to:
             </p>
             <ul className="list-disc list-inside mb-8 space-y-2 text-white/50 text-sm">
               <li>Recording of video and audio</li>
@@ -414,86 +595,90 @@ export default function VideoSession() {
         </div>
       )}
 
-      {/* ✅ Offer modal — now correctly inside return, no duplicate in chat panel */}
-      {showOfferModal && offers && (
+      {/* ── Offer modal — horizontal 3-card layout ─────────────────────────────── */}
+      {showOfferModal && isApproved && offers && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl">
-          <div className="bg-[#1c1c1e] border border-white/10 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl">
-            <div className="p-8 text-center">
-              <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
-                <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-bold text-white mb-2">Exclusive Offers For You</h2>
-              <p className="text-white/50 text-sm mb-6">
-                Based on your KYC and income profile, we've unlocked these limits.
-              </p>
+          <div className="bg-[#1c1c1e] border border-white/10 w-full max-w-5xl rounded-[32px] overflow-hidden shadow-2xl p-10">
 
-              {/* FOIR badge */}
+            {/* Header row */}
+            <div className="flex items-center justify-between mb-8 border-b border-white/10 pb-6">
+              <div>
+                <h2 className="text-3xl font-bold text-white mb-1">
+                  Exclusive Offers For You
+                </h2>
+                <p className="text-white/50 text-sm">
+                  Select a plan to proceed with documentation.
+                </p>
+              </div>
+
+              {/* FOIR badge in header */}
               {decision && (
-                <div className="flex items-center justify-center gap-2 mb-5">
-                  <span className="text-xs text-white/40">FOIR</span>
-                  <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded-full border ${
-                    decision.foirStatus === "safe"
-                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
-                      : decision.foirStatus === "moderate"
-                      ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/20"
-                      : "text-red-400 bg-red-500/10 border-red-500/20"
-                  }`}>
-                    {(decision.foir * 100).toFixed(1)}% — {decision.foirStatus}
+                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-5 py-3">
+                  <div
+                    className={`w-2 h-2 rounded-full animate-pulse ${FOIR_COLOR[decision.foirStatus]}`}
+                  />
+                  <div className="text-sm font-medium">
+                    <span className="text-white/40">FOIR</span>
+                    <span
+                      className={`ml-2 font-mono ${FOIR_TEXT_COLOR[decision.foirStatus]}`}
+                    >
+                      {decision.foir.toFixed(1)}% —{" "}
+                      {decision.foirStatus.toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-xs text-white/30 font-mono border-l border-white/10 pl-3">
+                    Score: {decision.proxyScore}
                   </span>
-                  <span className="text-xs text-white/30 font-mono">Score: {decision.proxyScore}</span>
                 </div>
               )}
+            </div>
 
-              <div className="space-y-3">
-                {offers.map((offer) => {
-                  const accentBorder: Record<string, string> = {
-                    Safe: "border-emerald-500/30 hover:border-emerald-500/60",
-                    Balanced: "border-blue-500/30 hover:border-blue-500/60",
-                    Max: "border-yellow-500/30 hover:border-yellow-500/60",
-                  };
-                  const planLabel: Record<string, string> = {
-                    Safe: "text-emerald-400",
-                    Balanced: "text-blue-400",
-                    Max: "text-yellow-400",
-                  };
-                  return (
-                    <div
-                      key={offer.plan}
-                      onClick={() => handleSelection(offer, "accepted")}
-                      className={`p-5 rounded-2xl bg-white/5 border cursor-pointer transition-all hover:bg-white/10 ${accentBorder[offer.plan]}`}
-                    >
-                      <div className="flex justify-between items-center mb-1">
-                        <span className={`text-[10px] font-bold uppercase tracking-widest ${planLabel[offer.plan]}`}>
-                          {offer.plan} Plan
-                        </span>
-                        <span className="text-xs font-bold text-white/60">{offer.annualInterestRate}% APR</span>
-                      </div>
-                      <p className="text-2xl font-mono font-semibold text-white mt-1 text-left">
-                        {inr(offer.principalAmount)}
-                      </p>
-                      <div className="flex justify-between mt-3 text-[10px] text-white/40 border-t border-white/5 pt-2">
-                        <span>EMI: <span className="text-white/60 font-mono">{inr(offer.monthlyEmi)}/mo</span></span>
-                        <span>Tenure: <span className="text-white/60 font-mono">{offer.tenureMonths} months</span></span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {/* ✅ 3 horizontal cards — selectedOffer + onSelect passed as props */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+              {offers.map((opt) => (
+                <LoanOfferCard
+                  key={opt.plan}
+                  option={opt}
+                  selectedPlan={selectedOffer?.plan ?? null}
+                  onSelect={setSelectedOffer}
+                />
+              ))}
+            </div>
 
+            {/* Bottom actions */}
+            <div className="flex items-center justify-end gap-4 border-t border-white/10 pt-8">
               <button
                 onClick={() => handleSelection(null, "rejected")}
-                className="mt-6 text-white/30 hover:text-white/60 text-sm font-medium transition-colors"
+                className="bg-white/5 hover:bg-white/10 text-white/40 hover:text-white/80 transition-colors text-sm font-medium rounded-xl px-8 py-3.5"
               >
-                No thanks, I'll pass
+                Decline Offers
+              </button>
+
+              <button
+                disabled={selectedOffer === null}
+                onClick={() =>
+                  selectedOffer && handleSelection(selectedOffer, "accepted")
+                }
+                className="bg-green-600 disabled:bg-white/10 disabled:text-white/20 disabled:border-white/5 text-white transition-all text-sm font-medium rounded-xl px-12 py-3.5 flex items-center gap-2 group border border-green-500/50 disabled:border-transparent disabled:cursor-not-allowed"
+              >
+                {selectedOffer === null ? (
+                  "Select an Offer to Accept"
+                ) : (
+                  <>
+                    Accept{" "}
+                    <span className="text-green-200 font-mono group-hover:scale-105 transition-transform">
+                      {inr(selectedOffer.principalAmount)}
+                    </span>{" "}
+                    Offer
+                  </>
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Application submitted screen ── */}
+      {/* ── Application submitted screen ───────────────────────────────────────── */}
       {sessionState === "completed" && (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
           <div className="bg-[#121212] border border-white/10 rounded-3xl max-w-sm w-full p-10 text-center shadow-2xl">
@@ -502,9 +687,12 @@ export default function VideoSession() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <h2 className="text-2xl font-semibold text-white mb-3">Application Submitted</h2>
+            <h2 className="text-2xl font-semibold text-white mb-3">
+              Application Submitted
+            </h2>
             <p className="text-white/50 text-sm leading-relaxed mb-8">
-              Your loan application has been received. Our team will review your KYC details and reach out within 24–48 hours.
+              Your loan application has been received. Our team will review your
+              KYC details and reach out within 24–48 hours.
             </p>
             <button
               onClick={() => {
@@ -512,6 +700,7 @@ export default function VideoSession() {
                 setIsComplete(false);
                 setDecision(null);
                 setOffers(null);
+                setSelectedOffer(null);
                 setMessages([]);
                 setFormData({});
               }}
@@ -523,29 +712,60 @@ export default function VideoSession() {
         </div>
       )}
 
-      {/* ── Permission badges ── */}
+      {/* ── Permission badges ───────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <StatusBadge label="Camera"     status={cameraStatus   === "granted" ? "granted" : cameraStatus   === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
-        <StatusBadge label="Microphone" status={micStatus      === "granted" ? "granted" : micStatus      === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
-        <StatusBadge label="Location"   status={locationStatus === "granted" ? "granted" : locationStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
-        {isListening      && <StatusBadge label="Listening…"       status="granted" />}
-        {isTranscribing   && <StatusBadge label="Transcribing…"    status="pending" />}
-        {isBotTyping      && <StatusBadge label="Agent Processing" status="pending" />}
-        {verificationStep === "analyzing" && <StatusBadge label="Verifying Identity…" status="pending" />}
+        <StatusBadge
+          label="Camera"
+          status={
+            cameraStatus === "granted" ? "granted"
+            : cameraStatus === "denied" ? "denied"
+            : sessionState === "idle" ? "idle"
+            : "pending"
+          }
+        />
+        <StatusBadge
+          label="Microphone"
+          status={
+            micStatus === "granted" ? "granted"
+            : micStatus === "denied" ? "denied"
+            : sessionState === "idle" ? "idle"
+            : "pending"
+          }
+        />
+        <StatusBadge
+          label="Location"
+          status={
+            locationStatus === "granted" ? "granted"
+            : locationStatus === "denied" ? "denied"
+            : sessionState === "idle" ? "idle"
+            : "pending"
+          }
+        />
+        {isListening    && <StatusBadge label="Listening…"       status="granted" />}
+        {isTranscribing && <StatusBadge label="Transcribing…"    status="pending" />}
+        {isBotTyping    && <StatusBadge label="Agent Processing" status="pending" />}
+        {verificationStep === "analyzing" && (
+          <StatusBadge label="Verifying Identity…" status="pending" />
+        )}
         {sessionState === "active" && faceStats.warning && (
           <StatusBadge label={faceStats.warning} status="denied" />
         )}
       </div>
 
-      {/* ── Main two-column layout ── */}
+      {/* ── Main two-column layout ─────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-4 items-start">
 
-        {/* ── Left: Video + stats + controls ── */}
+        {/* ── Left: Video + stats + controls ────────────────────────────────────── */}
         <div className="flex flex-col gap-4">
           <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 aspect-video">
             <video
-              ref={videoRef} autoPlay muted playsInline
-              className={`w-full h-full object-cover transition-opacity duration-500 ${sessionState === "active" ? "opacity-100" : "opacity-0"}`}
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className={`w-full h-full object-cover transition-opacity duration-500 ${
+                sessionState === "active" ? "opacity-100" : "opacity-0"
+              }`}
             />
 
             {/* Idle / stopped placeholder */}
@@ -556,7 +776,9 @@ export default function VideoSession() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
                   </svg>
                 </div>
-                <p className="text-white/30 text-sm">{sessionState === "stopped" ? "Session ended" : "Camera inactive"}</p>
+                <p className="text-white/30 text-sm">
+                  {sessionState === "stopped" ? "Session ended" : "Camera inactive"}
+                </p>
               </div>
             )}
 
@@ -564,7 +786,9 @@ export default function VideoSession() {
             {sessionState === "active" && (
               <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-xl px-3 py-1.5">
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-white text-xs font-mono font-medium">{formatTime(elapsed)}</span>
+                <span className="text-white text-xs font-mono font-medium">
+                  {formatTime(elapsed)}
+                </span>
               </div>
             )}
 
@@ -575,39 +799,53 @@ export default function VideoSession() {
                   <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full" />
                   <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin" />
                 </div>
-                <h3 className="text-white font-semibold text-lg mb-2">Verifying Identity</h3>
-                <p className="text-white/60 text-sm">Please stay still and look directly into the camera…</p>
+                <h3 className="text-white font-semibold text-lg mb-2">
+                  Verifying Identity
+                </h3>
+                <p className="text-white/60 text-sm">
+                  Please stay still and look directly into the camera…
+                </p>
                 {faceStats.warning && (
                   <p className="mt-4 text-red-400 text-xs font-medium bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20">
                     {faceStats.warning}
                   </p>
                 )}
                 {detectedAge && (
-                  <p className="mt-3 text-emerald-400 text-xs font-mono">Age group: {detectedAge}</p>
+                  <p className="mt-3 text-emerald-400 text-xs font-mono">
+                    Age group: {detectedAge}
+                  </p>
                 )}
               </div>
             )}
 
             {/* Presence verification overlay */}
-            {sessionState === "active" && verificationStep === "idle" && !faceStats.warning && (
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">
-                <p className="text-white font-medium text-sm animate-pulse">Verifying presence…</p>
-              </div>
-            )}
+            {sessionState === "active" &&
+              verificationStep === "idle" &&
+              !faceStats.warning && (
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">
+                  <p className="text-white font-medium text-sm animate-pulse">
+                    Verifying presence…
+                  </p>
+                </div>
+              )}
 
             {/* Face warning banner */}
-            {sessionState === "active" && verificationStep !== "analyzing" && faceStats.warning && (
-              <div className="absolute bottom-14 left-0 right-0 flex justify-center z-20">
-                <div className="bg-red-500/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-xl">
-                  {faceStats.warning}
+            {sessionState === "active" &&
+              verificationStep !== "analyzing" &&
+              faceStats.warning && (
+                <div className="absolute bottom-14 left-0 right-0 flex justify-center z-20">
+                  <div className="bg-red-500/90 backdrop-blur-sm text-white text-xs font-medium px-4 py-2 rounded-xl">
+                    {faceStats.warning}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* GPS */}
             {location && sessionState === "active" && (
               <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-sm rounded-xl px-3 py-1.5 z-10">
-                <p className="text-white/50 text-xs font-mono">{location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}</p>
+                <p className="text-white/50 text-xs font-mono">
+                  {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                </p>
               </div>
             )}
           </div>
@@ -615,7 +853,9 @@ export default function VideoSession() {
           {/* Face monitor stats */}
           {(sessionState === "active" || sessionState === "stopped") && (
             <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 flex flex-col gap-2">
-              <p className="text-xs font-medium text-white/40 uppercase tracking-wider mb-1">Face Monitor</p>
+              <p className="text-xs font-medium text-white/40 uppercase tracking-wider mb-1">
+                Face Monitor
+              </p>
               <MonitorStat label="No face detected" value={faceStats.noFaceSecs}    warn={true} />
               <MonitorStat label="Multiple faces"    value={faceStats.multiFaceSecs} warn={true} />
               <MonitorStat label="Liveness failed"   value={faceStats.notLiveSecs}   warn={true} />
@@ -656,7 +896,11 @@ export default function VideoSession() {
                   New Session
                 </button>
                 {downloadUrl && (
-                  <a href={downloadUrl} download="session.webm" className="text-sm text-white/50 hover:text-white/80 border border-white/10 rounded-xl px-4 py-2.5 transition-colors">
+                  <a
+                    href={downloadUrl}
+                    download="session.webm"
+                    className="text-sm text-white/50 hover:text-white/80 border border-white/10 rounded-xl px-4 py-2.5 transition-colors"
+                  >
                     Download Recording
                   </a>
                 )}
@@ -665,27 +909,41 @@ export default function VideoSession() {
           </div>
         </div>
 
-        {/* ── Right: Agent panel ── */}
+        {/* ── Right: Agent panel ─────────────────────────────────────────────────── */}
         <div className="rounded-2xl border border-white/10 bg-white/5 flex flex-col h-[520px] overflow-hidden">
 
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0 bg-black/20">
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2">
-                <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${sessionState === "active" && !isComplete ? "animate-ping bg-emerald-400" : "bg-white/30"}`} />
-                <span className={`relative inline-flex rounded-full h-2 w-2 ${sessionState === "active" && !isComplete ? "bg-emerald-500" : "bg-white/40"}`} />
+                <span
+                  className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    sessionState === "active" && !isComplete
+                      ? "animate-ping bg-emerald-400"
+                      : "bg-white/30"
+                  }`}
+                />
+                <span
+                  className={`relative inline-flex rounded-full h-2 w-2 ${
+                    sessionState === "active" && !isComplete
+                      ? "bg-emerald-500"
+                      : "bg-white/40"
+                  }`}
+                />
               </span>
               <span className="text-sm font-medium text-white/70">
                 {isComplete ? "Application Review" : `Section ${currentSection} of 4`}
               </span>
             </div>
-            <span className="text-xs text-emerald-400 font-mono">{fieldsCaptured} fields captured</span>
+            <span className="text-xs text-emerald-400 font-mono">
+              {fieldsCaptured} fields captured
+            </span>
           </div>
 
-          {/* Body — chat only, no duplicate offer cards */}
+          {/* Body */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10">
 
-            {/* Rejected */}
+            {/* Rejected state */}
             {isRejected && (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 gap-4">
                 <div className="w-14 h-14 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center">
@@ -694,14 +952,18 @@ export default function VideoSession() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-white font-medium mb-1">Application Declined</h3>
+                  <h3 className="text-white font-medium mb-1">
+                    Application Declined
+                  </h3>
                   <p className="text-white/40 text-xs leading-relaxed max-w-[240px]">
-                    {decision?.rejectionReasons?.join(" ") || "Based on your FOIR and credit profile, we cannot proceed at this time."}
+                    {decision?.rejectionReasons?.join(" ") ||
+                      "Based on your FOIR and credit profile, we cannot proceed at this time."}
                   </p>
                 </div>
                 {decision && (
                   <p className="text-[10px] text-white/20 font-mono">
-                    Proxy score: {decision.proxyScore} · FOIR: {(decision.foir * 100).toFixed(1)}%
+                    Proxy score: {decision.proxyScore} · FOIR:{" "}
+                    {decision.foir.toFixed(1)}%
                   </p>
                 )}
               </div>
@@ -712,21 +974,32 @@ export default function VideoSession() {
               <>
                 {messages.length === 0 && sessionState === "idle" && (
                   <div className="h-full flex flex-col items-center justify-center text-center">
-                    <p className="text-white/30 text-sm">Start the session to begin the automated interview.</p>
+                    <p className="text-white/30 text-sm">
+                      Start the session to begin the automated interview.
+                    </p>
                   </div>
                 )}
-                {messages.length === 0 && sessionState === "active" && !isVideoVerified && (
-                  <div className="h-full flex flex-col items-center justify-center text-center gap-2">
-                    <p className="text-white/30 text-sm animate-pulse">Verifying your identity…</p>
-                  </div>
-                )}
+                {messages.length === 0 &&
+                  sessionState === "active" &&
+                  !isVideoVerified && (
+                    <div className="h-full flex flex-col items-center justify-center text-center gap-2">
+                      <p className="text-white/30 text-sm animate-pulse">
+                        Verifying your identity…
+                      </p>
+                    </div>
+                  )}
                 {messages.map((msg) => (
-                  <div key={msg.id} className={`flex w-full ${msg.role === "bot" ? "justify-start" : "justify-end"}`}>
-                    <div className={`max-w-[85%] px-4 py-2.5 text-sm leading-relaxed ${
-                      msg.role === "bot"
-                        ? "bg-white/10 text-white/80 rounded-2xl rounded-tl-sm border border-white/5"
-                        : "bg-blue-600 text-white rounded-2xl rounded-tr-sm shadow-md"
-                    }`}>
+                  <div
+                    key={msg.id}
+                    className={`flex w-full ${msg.role === "bot" ? "justify-start" : "justify-end"}`}
+                  >
+                    <div
+                      className={`max-w-[85%] px-4 py-2.5 text-sm leading-relaxed ${
+                        msg.role === "bot"
+                          ? "bg-white/10 text-white/80 rounded-2xl rounded-tl-sm border border-white/5"
+                          : "bg-blue-600 text-white rounded-2xl rounded-tr-sm shadow-md"
+                      }`}
+                    >
                       {msg.text}
                     </div>
                   </div>
@@ -745,9 +1018,12 @@ export default function VideoSession() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input — hidden once complete */}
+          {/* Input */}
           {!isComplete && (
-            <form onSubmit={handleManualSubmit} className="p-3 border-t border-white/10 bg-black/20 flex gap-2 shrink-0 items-center relative">
+            <form
+              onSubmit={handleManualSubmit}
+              className="p-3 border-t border-white/10 bg-black/20 flex gap-2 shrink-0 items-center relative"
+            >
               {isListening && !isBotTyping && (
                 <div className="absolute -top-6 left-4 text-[10px] text-white/40 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
@@ -760,20 +1036,34 @@ export default function VideoSession() {
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={sessionState !== "active" || !isVideoVerified || isBotTyping}
+                disabled={
+                  sessionState !== "active" ||
+                  !isVideoVerified ||
+                  isBotTyping
+                }
                 placeholder={
-                  sessionState === "idle"            ? "Waiting to start…"
-                  : verificationStep === "analyzing" ? "Verifying identity…"
-                  : !isVideoVerified                 ? "Verifying video…"
-                  : isBotTyping                      ? "Agent is typing…"
-                  : isListening                      ? "Speak — text appears here…"
-                  : "Type your answer…"
+                  sessionState === "idle"
+                    ? "Waiting to start…"
+                    : verificationStep === "analyzing"
+                    ? "Verifying identity…"
+                    : !isVideoVerified
+                    ? "Verifying video…"
+                    : isBotTyping
+                    ? "Agent is typing…"
+                    : isListening
+                    ? "Speak — text appears here…"
+                    : "Type your answer…"
                 }
                 className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/30 focus:bg-white/10 transition-all disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={!chatInput.trim() || sessionState !== "active" || !isVideoVerified || isBotTyping}
+                disabled={
+                  !chatInput.trim() ||
+                  sessionState !== "active" ||
+                  !isVideoVerified ||
+                  isBotTyping
+                }
                 className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 active:scale-95 transition-all text-white p-2.5 rounded-xl flex items-center justify-center"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

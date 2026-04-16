@@ -90,7 +90,7 @@ export default function AdminPage() {
       {/* Nav */}
       <nav className="flex items-center justify-between px-8 py-5 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <span className="text-lg font-semibold tracking-tight">Veridian</span>
+          <span className="text-lg font-semibold tracking-tight">LoanLens AI</span>
           <span className="text-xs px-2 py-0.5 rounded-full border border-white/20 text-white/40">
             Admin
           </span>
