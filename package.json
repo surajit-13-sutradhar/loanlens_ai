@@ -11,6 +11,7 @@
   "dependencies": {
     "@clerk/nextjs": "^7.0.12",
     "@deepgram/sdk": "^5.0.0",
+    "@google/generative-ai": "^0.24.1",
     "@phosphor-icons/react": "^2.1.10",
     "@types/nodemailer": "^8.0.0",
     "class-variance-authority": "^0.7.1",
