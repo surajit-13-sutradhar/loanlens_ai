@@ -163,8 +163,7 @@ export function useFaceMonitor(): FaceMonitorResult {
   // ── On-demand age detection ───────────────────────────────────────────────
   const triggerAgeDetection = useCallback(async (): Promise<string | null> => {
     const data = await analyzeFrame(true);
-    if (!data || data.error) return null;
-    return data.age_range ?? null;
+    return data;
   }, [analyzeFrame]);
 
   useEffect(() => {
