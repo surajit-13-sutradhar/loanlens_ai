@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     await transporter.sendMail({
       from: process.env.GMAIL_USER,
       to: email,
-      subject: "Your Loan Onboarding Link — Veridian",
+      subject: "Your Loan Onboarding Link- LoanLens AI",
       text: `Hi ${name},\n\nComplete your loan onboarding using the link below:\n\n${link}\n\nThis link is unique to you. Please do not share it.\n\nRegards,\nVeridian Team`,
     });
   } catch (err) {
