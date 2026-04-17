@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 
 interface Session {
   id: string;
@@ -10,7 +12,9 @@ interface Session {
   phone: string;
   email: string;
   status: "pending" | "opened" | "submitted";
-  createdAt: string;
+  created_at: string; // Updated from createdAt to match Supabase schema
+  kyc_data?: Record<string, any>;
+  loan_decision?: any;
 }
 
 const statusStyles: Record<string, string> = {
@@ -34,9 +38,15 @@ export default function AdminPage() {
   };
 
   const loadSessions = useCallback(async () => {
-    const res = await fetch("/api/sessions");
-    const data = await res.json();
-    setSessions(data);
+    try {
+      const res = await fetch("/api/sessions");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch");
+      setSessions(data);
+    } catch (err) {
+      console.error(err);
+      showToast("Failed to load sessions");
+    }
   }, []);
 
   useEffect(() => {
@@ -77,12 +87,76 @@ export default function AdminPage() {
     }
   };
 
+  // --- PDF Generation Logic ---
+  const downloadPDF = (session: Session) => {
+    const doc = new jsPDF();
+    
+    // Header Info
+    doc.setFontSize(18);
+    doc.text(`Loan Application: ${session.name}`, 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Session ID: ${session.id}`, 14, 26);
+    doc.text(`Date Submitted: ${new Date(session.created_at).toLocaleString("en-IN")}`, 14, 32);
+
+    // Prepare dynamic array for KYC Data Table
+    const kycRows = session.kyc_data 
+      ? Object.entries(session.kyc_data)
+          .filter(([_, v]) => v !== null && v !== undefined) // filter out empty values
+          .map(([k, v]) => [
+            // Add spaces before capital letters for readability (e.g., fullName -> full Name)
+            k.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()), 
+            String(v)
+          ]) 
+      : [];
+
+    // Table 1: Base Info + Extracted KYC Data
+    (doc as any).autoTable({
+      startY: 40,
+      head: [['Field', 'Value']],
+      body: [
+        ['Phone Number', session.phone],
+        ['Email Address', session.email],
+        ...kycRows
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [41, 128, 185] },
+      styles: { fontSize: 9 },
+    });
+
+    // Table 2: Loan Decision Details (if available)
+    if (session.loan_decision?.selectedOffer) {
+      const finalY = (doc as any).lastAutoTable.finalY || 40;
+      
+      doc.setFontSize(14);
+      doc.text("Selected Loan Details", 14, finalY + 15);
+      
+      const offer = session.loan_decision.selectedOffer;
+      
+      (doc as any).autoTable({
+        startY: finalY + 20,
+        head: [['Attribute', 'Value']],
+        body: [
+          ['Plan Type', offer.plan],
+          ['Principal Amount', `INR ${offer.principalAmount.toLocaleString("en-IN")}`],
+          ['Tenure', `${offer.tenureMonths} Months`],
+          ['Annual Interest Rate', `${offer.annualInterestRate}%`],
+          ['Monthly EMI', `INR ${offer.monthlyEmi.toLocaleString("en-IN")}`]
+        ],
+        theme: 'grid',
+        headStyles: { fillColor: [39, 174, 96] }, // Emerald-ish green header
+        styles: { fontSize: 9 },
+      });
+    }
+
+    doc.save(`KYC_${session.name.replace(/\s+/g, '_')}.pdf`);
+  };
+
   return (
     <main className="min-h-screen bg-black text-white">
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-xl text-sm shadow-lg">
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-xl text-sm shadow-lg transition-all">
           {toast}
         </div>
       )}
@@ -114,20 +188,20 @@ export default function AdminPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Customer name"
-              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30"
+              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
             />
             <input
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               placeholder="Phone number"
-              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30"
+              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
             />
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email address"
               type="email"
-              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30"
+              className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
             />
           </div>
 
@@ -135,7 +209,7 @@ export default function AdminPage() {
             <Button
               onClick={createSession}
               disabled={loading}
-              className="bg-blue-600 hover:bg-blue-500 text-white rounded-xl px-6"
+              className="bg-blue-600 hover:bg-blue-500 text-white rounded-xl px-6 transition-colors"
             >
               {loading ? "Sending..." : "Generate & Send Link"}
             </Button>
@@ -148,7 +222,7 @@ export default function AdminPage() {
                     navigator.clipboard.writeText(generatedLink);
                     showToast("Link copied");
                   }}
-                  className="text-white/60 hover:text-white shrink-0 text-xs"
+                  className="text-white/60 hover:text-white shrink-0 text-xs transition-colors"
                 >
                   Copy
                 </button>
@@ -163,7 +237,7 @@ export default function AdminPage() {
             <h2 className="text-lg font-semibold">All Sessions</h2>
             <button
               onClick={loadSessions}
-              className="text-xs text-white/40 hover:text-white/70 border border-white/10 rounded-lg px-3 py-1.5"
+              className="text-xs text-white/40 hover:text-white/70 border border-white/10 rounded-lg px-3 py-1.5 transition-colors"
             >
               Refresh
             </button>
@@ -183,11 +257,13 @@ export default function AdminPage() {
                     <th className="text-left py-3 pr-4">Email</th>
                     <th className="text-left py-3 pr-4">Status</th>
                     <th className="text-left py-3">Created</th>
+                    {/* Empty th for the action column */}
+                    <th className="text-right py-3"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {sessions.map((s) => (
-                    <tr key={s.id} className="border-b border-white/5 hover:bg-white/5">
+                    <tr key={s.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                       <td className="py-3 pr-4 font-medium">{s.name}</td>
                       <td className="py-3 pr-4 text-white/50">{s.phone}</td>
                       <td className="py-3 pr-4 text-white/50">{s.email}</td>
@@ -196,8 +272,20 @@ export default function AdminPage() {
                           {s.status.toUpperCase()}
                         </span>
                       </td>
-                      <td className="py-3 text-white/30 text-xs">
-                        {new Date(s.createdAt).toLocaleString("en-IN")}
+                      <td className="py-3 text-white/30 text-xs font-mono">
+                        {new Date(s.created_at).toLocaleString("en-IN", {
+                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="py-3 text-right">
+                        {s.status === "submitted" && (
+                          <button
+                            onClick={() => downloadPDF(s)}
+                            className="text-[11px] font-semibold tracking-wide text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 px-3 py-1.5 rounded-lg transition-all"
+                          >
+                            DOWNLOAD PDF
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

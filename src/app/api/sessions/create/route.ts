@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSession } from "@/lib/sessionStore";
+import { supabase } from "@/lib/supabase";
 import nodemailer from "nodemailer";
 
 export async function POST(req: NextRequest) {
@@ -13,16 +13,17 @@ export async function POST(req: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const link = `${appUrl}/join/${id}`;
 
-  createSession({
-    id,
-    name,
-    phone,
-    email,
-    status: "pending",
-    createdAt: new Date().toISOString(),
-  });
+  // Insert into Supabase
+  const { error: dbError } = await supabase
+    .from('loan_sessions')
+    .insert([{ id, name, phone, email, status: 'pending' }]);
 
-  // Send email using same Gmail credentials as your Python setup
+  if (dbError) {
+    console.error("DB Error:", dbError);
+    return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
+  }
+
+  // Send email
   try {
     const transporter = nodemailer.createTransport({
       service: "gmail",
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("Email error:", err);
+    // Even if email fails, DB record was created. You might want to handle this edge case.
     return NextResponse.json({ error: "Email failed to send" }, { status: 500 });
   }
 
