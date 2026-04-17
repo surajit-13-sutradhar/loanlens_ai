@@ -468,7 +468,7 @@ export default function VideoSession({ sessionId }: { sessionId: string }) {
   };
 
   // ── Offer selection ───────────────────────────────────────────────────────────
-  // ✅ Uses formData (not undefined extractedData)
+  //  Uses formData (not undefined extractedData)
   const handleSelection = async (
     offer: LoanOption | null,
     status: "accepted" | "rejected"
