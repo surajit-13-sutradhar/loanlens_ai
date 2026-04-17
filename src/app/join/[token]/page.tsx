@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { getSession, updateSessionStatus } from "@/lib/sessionStore";
+import { supabase } from "@/lib/supabase";
 
 export default async function JoinPage({
   params,
@@ -8,10 +8,16 @@ export default async function JoinPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const session = getSession(token);
+  
+  // 1. Fetch session from Supabase
+  const { data: session, error } = await supabase
+    .from('loan_sessions')
+    .select('*')
+    .eq('id', token)
+    .single();
 
-  // Invalid token
-  if (!session) {
+  // 2. Invalid or missing token
+  if (error || !session) {
     return (
       <main className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -25,19 +31,26 @@ export default async function JoinPage({
     );
   }
 
-  // Mark as opened
+  // 3. Mark as opened if it's currently pending
   if (session.status === "pending") {
-    updateSessionStatus(token, "opened");
+    await supabase
+      .from('loan_sessions')
+      .update({ status: 'opened' })
+      .eq('id', token);
   }
 
-  // Check if user is signed into Clerk
+  // 4. Check if user is signed into Clerk
   const { userId } = await auth();
 
+  // 5. Redirect to dashboard, BUT strictly pass the sessionId along 
+  // so the VideoSession component knows which row to update later!
+  const dashboardUrl = `/dashboard?sessionId=${token}`;
+
   if (userId) {
-    // Already signed in → go straight to dashboard
-    redirect("/dashboard");
+    // Already signed in → go straight to dashboard with ID
+    redirect(dashboardUrl);
   } else {
-    // Not signed in → go to sign-in, then redirect to dashboard after
-    redirect(`/sign-in?redirect_url=/dashboard`);
+    // Not signed in → go to sign-in, then redirect to dashboard with ID
+    redirect(`/sign-in?redirect_url=${encodeURIComponent(dashboardUrl)}`);
   }
 }

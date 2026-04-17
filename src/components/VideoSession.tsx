@@ -233,7 +233,7 @@ function LoanOfferCard({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function VideoSession() {
+export default function VideoSession({ sessionId }: { sessionId: string }) {
   const [sessionState, setSessionState]         = useState<SessionState>("idle");
   const [elapsed, setElapsed]                   = useState(0);
   const [downloadUrl, setDownloadUrl]           = useState<string | null>(null);
@@ -284,7 +284,7 @@ export default function VideoSession() {
     (v) => v !== null && v !== undefined
   ).length;
   const isRejected = isComplete && decision?.decision === "REJECT";
-  // ✅ isApproved defined here — used in the offer modal condition
+  //  isApproved defined here — used in the offer modal condition
   const isApproved =
     isComplete &&
     (decision?.decision === "APPROVE" || decision?.decision === "REVIEW");
@@ -473,19 +473,31 @@ export default function VideoSession() {
     offer: LoanOption | null,
     status: "accepted" | "rejected"
   ) => {
-    console.log(`User ${status} the offer:`, offer);
     stopMonitoring();
     if (videoRef.current?.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach((track) => track.stop());
     }
-    const finalPayload = {
-      userData: formData,
-      selection: offer,
-      status,
-      timestamp: new Date().toISOString(),
-    };
-    console.log("Final payload for admin:", finalPayload);
+
+    // --- NEW: Post data back to Supabase ---
+    try {
+      await fetch('/api/sessions/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: sessionId,
+          kycData: formData,
+          loanDecision: { 
+            selectedOffer: offer, 
+            rawDecision: decision 
+          },
+          status: "submitted"
+        })
+      });
+    } catch (error) {
+      console.error("Failed to save session data:", error);
+    }
+
     setShowOfferModal(false);
     setSessionState("completed");
   };
