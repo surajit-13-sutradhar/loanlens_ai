@@ -1,37 +1,49 @@
-export function calculateLoanDecision(data: any) {
-  const income = Number(data.monthlyNetIncome || 0);
-  const existingEmi = Number(data.totalMonthlyEmi || 0);
-  const requestedAmount = Number(data.loanAmountNeeded || 0);
-  const monthsAgo = Number(data.lastMissedEmiMonthsAgo || 999);
-  const isRecent = monthsAgo <= 12;
+// ✅ Add this helper at the top — strips currency symbols and commas
+function toNum(val: any): number {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return val;
+  // strip ₹, commas, spaces then parse
+  const cleaned = String(val).replace(/[₹,\s]/g, "");
+  const parsed = parseFloat(cleaned);
+  return isNaN(parsed) ? 0 : parsed;
+}
 
-  // 1. FOIR
-  const foirLimit = income < 25000 ? 0.35 : income <= 50000 ? 0.40 : 0.50;
+export function calculateLoanDecision(data: any) {
+  // ✅ Use toNum() for every numeric field
+  const income        = toNum(data.monthlyNetIncome);
+  const existingEmi   = toNum(data.totalMonthlyEmi);
+  const requestedAmount = toNum(data.loanAmountNeeded);
+  const monthsAgo     = toNum(data.lastMissedEmiMonthsAgo) || 999;
+  const isRecent      = monthsAgo <= 12;
+
+  // FOIR
+  const foirLimit   = income < 25000 ? 0.35 : income <= 50000 ? 0.40 : 0.50;
   const currentFoir = income > 0 ? existingEmi / income : 0;
-  const foirStatus =
-    currentFoir < foirLimit ? "safe" :
-    currentFoir < foirLimit + 0.1 ? "moderate" : "risky";
+  const foirStatus  =
+    currentFoir < foirLimit            ? "safe"     :
+    currentFoir < foirLimit + 0.1      ? "moderate" : "risky";
   const maxAffordableEmi = Math.max(0, foirLimit * income - existingEmi);
 
-  // 2. Proxy credit score (lastMissedEmiMonthsAgo now used)
+  // Proxy credit score
+  const missedCount = toNum(data.missedEmiCount);
   const payScore = data.hasMissedEmi
-    ? Number(data.missedEmiCount) >= 3
+    ? missedCount >= 3
       ? isRecent ? 20 : 45
       : isRecent ? 50 : 70
     : 100;
 
   const creditAgeScore =
-    Number(data.creditHistoryYears) >= 5 ? 100 :
-    Number(data.creditHistoryYears) >= 2 ? 80 : 50;
+    toNum(data.creditHistoryYears) >= 5 ? 100 :
+    toNum(data.creditHistoryYears) >= 2 ? 80  : 50;
 
-  const stabilityScore = Number(data.workTenureYears) >= 3 ? 100 : 60;
+  const stabilityScore = toNum(data.workTenureYears) >= 3 ? 100 : 60;
 
   const proxyScore =
-    payScore * 0.40 +
+    payScore      * 0.40 +
     creditAgeScore * 0.30 +
     stabilityScore * 0.30;
 
-  // 3. Decision
+  // Decision
   let decision: "APPROVE" | "REVIEW" | "REJECT" = "APPROVE";
   const reasons: string[] = [];
 
@@ -47,19 +59,19 @@ export function calculateLoanDecision(data: any) {
     decision = "REVIEW";
   }
 
-  // 4. Loan options (only if not rejected)
-  const loanOptions = decision !== "REJECT"
-    ? [
-        generateEMI(requestedAmount, 24, 11.5, "Safe"),
-        generateEMI(requestedAmount, 30, 12.5, "Balanced"),
-        generateEMI(requestedAmount, 36, 13.5, "Max"),
-      ]
-    : null;
+  const loanOptions =
+    decision !== "REJECT"
+      ? [
+          generateEMI(requestedAmount, 24, 11.5, "Safe"),
+          generateEMI(requestedAmount, 30, 12.5, "Balanced"),
+          generateEMI(requestedAmount, 36, 13.5, "Max"),
+        ]
+      : null;
 
   return {
     decision,
-    proxyScore: Math.round(proxyScore),
-    foir: parseFloat((currentFoir * 100).toFixed(1)),
+    proxyScore:       Math.round(proxyScore),
+    foir:             parseFloat((currentFoir * 100).toFixed(1)), // e.g. 38.5
     foirStatus,
     maxAffordableEmi: Math.round(maxAffordableEmi),
     rejectionReasons: reasons,

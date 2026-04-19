@@ -119,7 +119,7 @@ export default async function Home() {
               </div>
               <h3 className="text-xl font-medium text-white/90 mb-3">Live Identity Lens</h3>
               <p className="text-sm text-white/40 leading-relaxed font-light">
-                Simply look into your camera. We capture your face, voice, and precise location in real-time, treating your biometric identity with the utmost security and compliance.
+                Simply look into your camera. We capture your face, voice, age and precise location in real-time, treating your biometric identity with the utmost security and compliance.
               </p>
             </div>
 
@@ -132,7 +132,7 @@ export default async function Home() {
               </div>
               <h3 className="text-xl font-medium text-white/90 mb-3">Conversational Data Capture</h3>
               <p className="text-sm text-white/40 leading-relaxed font-light">
-                Speak naturally with our AI. Powered by Deepgram Nova-3, we transcribe your speech to text instantly, extracting employment and obligation details through organic dialogue.
+                Speak naturally with our AI—powered by Whisper large-v3, it instantly transcribes your speech to text while extracting key employment and obligation details through organic, human-like conversation, and with integrated Google Text-to-Speech (TTS), it also responds back in a natural voice, creating a seamless, real-time two-way conversational experience.
               </p>
             </div>
 
@@ -145,7 +145,7 @@ export default async function Home() {
               </div>
               <h3 className="text-xl font-medium text-white/90 mb-3">Crystal Underwriting</h3>
               <p className="text-sm text-white/40 leading-relaxed font-light">
-                Our intelligence layer assesses risk and generates a personalized loan offer. Instantaneous FOIR calculations appear like light through frosted glass, granting you total control.
+                Our intelligence layer assesses risk and generates a personalized loan offer, also calculating a proxy credit score and determining the maximum affordable EMI alongside instantaneous FOIR calculations that appear like light through frosted glass, granting you total control.
               </p>
             </div>
 

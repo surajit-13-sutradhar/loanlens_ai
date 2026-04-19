@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       from: process.env.GMAIL_USER,
       to: email,
       subject: "Your Loan Onboarding Link- LoanLens AI",
-      text: `Hi ${name},\n\nComplete your loan onboarding using the link below:\n\n${link}\n\nThis link is unique to you. Please do not share it.\n\nRegards,\nVeridian Team`,
+      text: `Hi ${name},\n\nComplete your loan onboarding using the link below:\n\n${link}\n\nThis link is unique to you. Please do not share it.\n\nRegards,\nTeam AJANTRIK`,
     });
   } catch (err) {
     console.error("Email error:", err);
