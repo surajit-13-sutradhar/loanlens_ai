@@ -519,7 +519,7 @@ export default function VideoSession({ sessionId }: { sessionId: string }) {
       )}
 
       {/* Permission badges */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap my-10">
         <StatusBadge label="Camera"     status={cameraStatus   === "granted" ? "granted" : cameraStatus   === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
         <StatusBadge label="Microphone" status={micStatus      === "granted" ? "granted" : micStatus      === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
         <StatusBadge label="Location"   status={locationStatus === "granted" ? "granted" : locationStatus === "denied" ? "denied" : sessionState === "idle" ? "idle" : "pending"} />
