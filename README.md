@@ -15,7 +15,6 @@ A real-time, automated video onboarding system engineered for rapid financial co
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Core Application Flows](#core-application-flows)
-- [Team Split](#team-split)
 - [Roadmap](#roadmap)
 
 ---
